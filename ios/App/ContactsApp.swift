@@ -37,11 +37,17 @@ struct Hit: Identifiable, Hashable {
   let name: String
   /// What's under the name: their phone, else email, else company.
   let detail: String
+  /// person, company or system; nil when unset (or from a spur that doesn't say).
+  let type: String?
+  let labels: [String]
 
   init(_ j: JSON) {
     id = j["id"].str
-    name = j["name"].str
-    detail = [j["phone"].str, j["email"].str, j["company"].str].first { !$0.isEmpty } ?? ""
+    name = Pretty.name(j["name"].str)
+    let phone = j["phone"].str
+    detail = [phone.isEmpty ? "" : Pretty.phone(phone), j["email"].str, j["company"].str].first { !$0.isEmpty } ?? ""
+    type = j["type"].string
+    labels = j["labels"].array.map(\.str).filter { !$0.isEmpty }
   }
 }
 
@@ -55,6 +61,8 @@ final class Model {
   private(set) var changes = 0
   /// The last change made here, for its Undo.
   var done: Done?
+  /// Every label anyone's under (from `people`), for the filters and a person's labels.
+  var labels: [String] = []
 
   struct Done: Equatable {
     let text: String
@@ -78,6 +86,20 @@ final class Model {
     let id = url.pathComponents.dropFirst().first ?? ""
     if url.host() == "person", !id.isEmpty { path = [.person(id)] }
     if url.host() == "history" { path = [.history] }
+  }
+
+  /// Reads every label anyone's under; an older spur without `people` leaves them as they were.
+  func loadLabels() async {
+    guard let r = try? await core.call("people") else { return }
+    let all = r["people"].array.flatMap { $0["labels"].array.map(\.str) }.filter { !$0.isEmpty }
+    var seen = Set<String>()
+    labels = all.filter { seen.insert($0.lowercased()).inserted }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+  }
+
+  /// Notes a label just added here, so the filters have it before the next read.
+  func know(_ label: String) {
+    guard !labels.contains(where: { $0.caseInsensitiveCompare(label) == .orderedSame }) else { return }
+    labels = (labels + [label]).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
   }
 
   func undo(_ batch: String) async throws {

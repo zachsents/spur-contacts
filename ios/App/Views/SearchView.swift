@@ -1,23 +1,29 @@
 import SwiftUI
 
-/// The root: a search over everyone (`search`), and, before anything's typed, the people the spur
-/// recently identified from unsaved numbers (`identified`).
+/// The root: a search over everyone (`search`), narrowed by a label and a type, and, before anything's
+/// typed or picked, the people the spur recently identified from unsaved numbers (`identified`).
 struct SearchView: View {
   let model: Model
   @State private var query = ""
   @State private var hits: [Hit] = []
   @State private var identified: [Hit] = []
   @State private var problem: String?
+  @State private var label: String?
+  /// person, company, system, or none for unset.
+  @State private var type: String?
   @FocusState private var typing: Bool
+
+  private var asking: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty || label != nil || type != nil }
 
   var body: some View {
     VStack(spacing: 0) {
       Down(core: model.core)
       SearchField(text: $query, focus: $typing)
+      Filters(labels: model.labels, label: $label, type: $type)
       if let problem { Problem(text: problem) }
       ScrollView {
         LazyVStack(spacing: 0) {
-          if query.trimmingCharacters(in: .whitespaces).isEmpty {
+          if !asking {
             if !identified.isEmpty {
               BoardSection(label: "Identified", count: identified.count, first: true) {
                 Rule()
@@ -45,21 +51,25 @@ struct SearchView: View {
         .accessibilityLabel("History")
       }
     }
-    .task(id: "\(query)|\(model.changes)") { await search() }
+    .task(id: "\(query)|\(label ?? "")|\(type ?? "")|\(model.changes)") { await search() }
     .task(id: model.changes) { await loadIdentified() }
+    .task { await model.loadLabels() }
     .seen(model.core, "search")
   }
 
   private func search() async {
     let q = query.trimmingCharacters(in: .whitespaces)
-    guard !q.isEmpty else {
+    guard asking else {
       hits = []
       return
     }
     try? await Task.sleep(for: .milliseconds(120))
     guard !Task.isCancelled else { return }
+    var args: [String: JSON] = ["query": .string(q), "limit": q.isEmpty ? 300 : 40]
+    if let label { args["label"] = .string(label) }
+    if let type { args["type"] = .string(type) }
     do {
-      let r = try await model.core.call("search", ["query": .string(q), "limit": 40])
+      let r = try await model.core.call("search", .object(args))
       guard !Task.isCancelled else { return }
       hits = r["people"].array.map(Hit.init)
       problem = nil
@@ -75,6 +85,58 @@ struct SearchView: View {
     } catch {
       problem = error.localizedDescription
     }
+  }
+}
+
+/// The search's two narrowings, side by side: a type and a label.
+private struct Filters: View {
+  let labels: [String]
+  @Binding var label: String?
+  @Binding var type: String?
+
+  var body: some View {
+    HStack(spacing: 0) {
+      Menu {
+        Picker("Type", selection: $type) {
+          Text("Any").tag(String?.none)
+          ForEach(PersonType.all, id: \.self) { Text(PersonType.name($0)).tag(String?.some($0)) }
+          Text("None").tag(String?.some("none"))
+        }
+      } label: {
+        FilterCell(name: "Type", value: type.map { $0 == "none" ? "None" : PersonType.name($0) })
+      }
+      Rectangle().fill(SIS.hair).frame(width: SIS.hairWidth)
+      Menu {
+        Picker("Label", selection: $label) {
+          Text("Any").tag(String?.none)
+          ForEach(labels, id: \.self) { Text($0).tag(String?.some($0)) }
+        }
+      } label: {
+        FilterCell(name: "Label", value: label)
+      }
+      .disabled(labels.isEmpty && label == nil)
+    }
+    .frame(height: SIS.row)
+    .overlay(alignment: .bottom) { Rule() }
+  }
+}
+
+/// A narrowing: its name until one's picked, then what's picked.
+private struct FilterCell: View {
+  let name: String
+  let value: String?
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Text(value ?? name).font(SIS.text(14, weight: value == nil ? .regular : .semibold))
+        .foregroundStyle(value == nil ? SIS.ink3 : SIS.ink).lineLimit(1)
+      Spacer(minLength: 4)
+      Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(SIS.ink3)
+    }
+    .padding(.horizontal, SIS.inset)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .contentShape(Rectangle())
+    .accessibilityLabel(value.map { "\(name), \($0)" } ?? name)
   }
 }
 
