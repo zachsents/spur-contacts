@@ -104,10 +104,10 @@ const urlOf = (detail: unknown): string => {
   return ""
 }
 
-// A link (a source's page, an email) opens in the browser or mail, not in the window.
+// A link (a source's page, a card in Contacts, an email) opens in the browser or mail, not in the window.
 Electrobun.events.on("new-window-open", (e: { readonly data: { readonly detail: unknown } }) => {
   const url = urlOf(e.data.detail)
-  if (/^(?:https?|mailto|tel|sms):/u.test(url)) {
+  if (/^(?:https?|mailto|tel|sms|addressbook):/u.test(url)) {
     Utils.openExternal(url)
   }
 })
