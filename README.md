@@ -18,7 +18,7 @@ view (⌘K, Spurs). It runs on a Mac (it reads Contacts through Contacts.app).
 - Connect a Google account with contacts access when Switch asks.
 - Allow the host to control Contacts the first time it reads them.
 - Looking up unknown numbers loads pages in the user's browser through the browser spur
-  (`github:zachsents/spur-browser#83a3948` or later).
+  (`github:zachsents/spur-browser#a4e1fda` or later).
 - Then run its `import` tool once. Its loops keep senders and other sources coming in, look up
   unknown numbers a few a day, and push changes out every two minutes (`CONTACTS_LOOPS=0` turns
   them off). Its log and state live in `$SWITCH_CONTACTS_DIR`, else `$SWITCH_DIR`, else
