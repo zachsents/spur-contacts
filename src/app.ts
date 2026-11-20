@@ -499,6 +499,12 @@ export const contactsApp = defineApp<LogService | ModelsService>({
       surfaces: ["space"],
       resource: "ui://contacts/identified",
       space: HOME,
+      size: {
+        aspect: "auto",
+        min: { cols: 3, rows: 1 },
+        preferred: { cols: 4, rows: 3 },
+        grows: true,
+      },
       tool: "identified",
       refresh: [SenderIdentified.type],
       a2ui: () => [
