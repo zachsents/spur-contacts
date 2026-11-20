@@ -685,11 +685,8 @@ const remotesOf = (target: Target, ids: readonly string[]) =>
     const remotes = new Map<string, Remote>()
     const googles = new Map<string, GooglePerson>()
     if (target === "apple") {
-      for (let i = 0; i < ids.length; i += 100) {
-        const cards = yield* appleCards(ids.slice(i, i + 100))
-        for (const c of cards) {
-          remotes.set(c.id, appleRemote(c))
-        }
+      for (const c of yield* appleCards(ids)) {
+        remotes.set(c.id, appleRemote(c))
       }
     } else {
       const groups = yield* googleGroups

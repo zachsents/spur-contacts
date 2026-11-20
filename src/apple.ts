@@ -355,45 +355,47 @@ export interface AppleCard {
   readonly groups: string[]
 }
 
-const CARD = `
-const C = Application("Contacts"); const ids = ${INPUT};
+// Every card at once, a column a call: far quicker than a card at a time.
+const CARDS = `
+const C = Application("Contacts"); const p = C.people;
 const pick = (f, d) => { try { return f() } catch (e) { return d } };
-const groups = pick(() => C.groups().map((g) => ({ name: g.name(), ids: g.people.id() })), []);
-const list = (c) => { const v = c.value(); const l = c.label(); return v.map((x, i) => ({ value: x, label: l[i] || "" })) };
-JSON.stringify(ids.map((id) => { try { const p = C.people.byId(id); return { id, first: p.firstName() || "", last: p.lastName() || "",
-  nick: p.nickname() || "", org: p.organization() || "", title: p.jobTitle() || "", note: p.note() || "", company: p.company(),
-  phones: list(p.phones), emails: list(p.emails), urls: list(p.urls),
-  groups: groups.filter((g) => g.ids.includes(id)).map((g) => g.name) } } catch (e) { return null } }))`
+JSON.stringify({ ids: p.id(), first: p.firstName(), last: p.lastName(), nick: p.nickname(), org: p.organization(),
+  title: p.jobTitle(), note: p.note(), company: p.company(), phones: p.phones.value(), phoneLabels: p.phones.label(),
+  emails: p.emails.value(), emailLabels: p.emails.label(), urls: p.urls.value(), urlLabels: p.urls.label(),
+  groups: pick(() => C.groups().map((g) => ({ name: g.name(), ids: g.people.id() })), []) })`
 
-const labelled = (v: unknown): Labelled[] =>
-  recs(v).map((x) => ({ value: text(x.value), label: appleLabel(text(x.label)) }))
-
-const cardOf = (c: unknown): AppleCard[] => {
-  if (!isJson(c) || typeof c.id !== "string") {
-    return []
-  }
-  return [
-    {
-      id: c.id,
-      first: text(c.first),
-      last: text(c.last),
-      nick: text(c.nick),
-      org: text(c.org),
-      title: text(c.title),
-      note: text(c.note),
-      company: c.company === true,
-      phones: labelled(c.phones),
-      emails: labelled(c.emails),
-      urls: labelled(c.urls),
-      groups: strings(c.groups).filter((g): g is string => g !== null && g !== SWITCH_GROUP),
-    },
-  ]
-}
-
-export const appleCards = (ids: readonly string[]) =>
-  Effect.map(jxa(CARD, ids), (raw) =>
-    Array.isArray(raw) ? raw.flatMap((c: unknown) => cardOf(c)) : [],
+const pairs = (values: (string | null)[] | undefined, labels: (string | null)[] | undefined) =>
+  (values ?? []).flatMap((v, i): Labelled[] =>
+    v === null ? [] : [{ value: v, label: appleLabel(labels?.[i]) }],
   )
+
+/** The cards with these ids, as they are now. */
+export const appleCards = (ids: readonly string[]) =>
+  Effect.map(jxa(CARDS), (raw): AppleCard[] => {
+    const d = dumpOf(raw)
+    const wanted = new Set(ids)
+    const groups = groupsOf(raw).filter((g) => g.name !== SWITCH_GROUP)
+    return d.ids.flatMap((id, i): AppleCard[] =>
+      id === null || !wanted.has(id)
+        ? []
+        : [
+            {
+              id,
+              first: d.first[i] ?? "",
+              last: d.last[i] ?? "",
+              nick: d.nick[i] ?? "",
+              org: d.org[i] ?? "",
+              title: d.title[i] ?? "",
+              note: d.note[i] ?? "",
+              company: d.company[i] === true,
+              phones: pairs(d.phones[i], d.phoneLabels[i]),
+              emails: pairs(d.emails[i], d.emailLabels[i]),
+              urls: pairs(d.urls[i], d.urlLabels[i]),
+              groups: groups.filter((g) => g.ids.includes(id)).map((g) => g.name),
+            },
+          ],
+    )
+  })
 
 export type AppleSingle = "first" | "last" | "nick" | "org" | "title" | "note"
 export type AppleList = "phones" | "emails" | "urls"
