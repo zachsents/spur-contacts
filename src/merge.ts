@@ -17,7 +17,7 @@ import {
   readPerson,
 } from "./model.ts"
 import type { Field, Person } from "./model.ts"
-import { commit, make, missing } from "./store.ts"
+import { commit, make, makeAll, missing } from "./store.ts"
 import type { Stated } from "./store.ts"
 
 /** One record from a source: an address book card, a CRM contact, a sender. */
@@ -112,6 +112,23 @@ const askSame = (a: string, b: string) =>
 
 const SURE = 0.8
 
+/**
+ * How a record finds who it is. model: a shared key with agreeing names, and the decision model
+ * for the rest. keys: a shared key with agreeing names only. exact: a shared key and the same
+ * name (or no name on one side): an address book's cards, merged only where there's no doubt.
+ */
+export type Matching = "model" | "keys" | "exact"
+
+/** Same name, as written once case and decoration are set aside; or no name on one side. */
+const sameNamed = (fields: readonly Field[], p: Person) => {
+  const ours = new Set(fields.filter((f) => f.kind === "name").map((f) => normOf("name", f.value)))
+  const theirs = p.fields.filter((f) => f.kind === "name" && f.suggested !== true)
+  if (ours.size === 0 || theirs.length === 0) {
+    return true
+  }
+  return theirs.some((f) => ours.has(normOf("name", f.value)))
+}
+
 /** Folds `from` into `into`: one event, with what it brought, for undo. */
 export const mergeEvent = (
   into: Person,
@@ -180,7 +197,7 @@ const decide = (
   all: readonly Field[],
   name: string | undefined,
   found: ReturnType<typeof lookup>,
-  useModel: boolean,
+  matching: Matching,
 ) =>
   Effect.gen(function* deciding() {
     let cost = 0
@@ -192,9 +209,15 @@ const decide = (
     ]
     for (const c of consider) {
       const theirs = best(c.p, "name")
-      if (found.known || (c.byKey && namesAgree(name, theirs))) {
+      if (found.known) {
         sure.push({ person: c.p, p: 1 })
-      } else if (useModel) {
+      } else if (matching === "exact") {
+        if (c.byKey && sameNamed(all, c.p)) {
+          sure.push({ person: c.p, p: 1 })
+        }
+      } else if (c.byKey && namesAgree(name, theirs)) {
+        sure.push({ person: c.p, p: 1 })
+      } else if (matching === "model") {
         asked += 1
         const answer = yield* askSame(summary(all), summary(c.p.fields)).pipe(
           Effect.orElseSucceed(() => ({ p: 0.5, cost: 0 })),
@@ -272,13 +295,16 @@ const contacted = (
 }
 
 /** Takes one record in. Sequential: each sees what the last wrote. */
-export const take = (record: SourceRecord, batch: string, reason: string, useModel: boolean) =>
+export const take = (record: SourceRecord, batch: string, reason: string, matching: Matching) =>
   Effect.gen(function* taking() {
     const log = yield* Log
     const now = Date.now()
-    const fields = record.fields
-      .filter((s) => s.value.trim() !== "")
-      .map((s) => make(s, record.source, record.user, now))
+    const fields = makeAll(
+      record.fields.filter((s) => s.value.trim() !== ""),
+      record.source,
+      record.user,
+      now,
+    ).filter((f) => f.value !== "")
     const { ref: source } = record
     const ref = source
       ? make(
@@ -292,7 +318,7 @@ export const take = (record: SourceRecord, batch: string, reason: string, useMod
     const name = fields.find((f) => f.kind === "name")?.value
 
     const found = yield* log.read((db) => lookup(db, ref, fields, name))
-    const { sure, cost, asked } = yield* decide(all, name, found, useModel)
+    const { sure, cost, asked } = yield* decide(all, name, found, matching)
 
     const folded = sure.length > 0 ? fold(sure, all, batch, reason) : { person: null, events: [] }
     const events: Draft[] = [...folded.events]

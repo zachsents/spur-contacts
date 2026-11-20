@@ -16,6 +16,12 @@ export const FIELDS =
 
 let account: string | null = null
 
+/** Whether a Google account with contacts access is connected, without asking for one. */
+export const googleConnected = Effect.map(googleAccount(SCOPE), (a) => {
+  account ??= a
+  return a !== null
+})
+
 /** The user's connected Google account, or an action item asking for one. */
 const bearer = async () => {
   account ??= await Effect.runPromise(googleAccount(SCOPE))
@@ -106,20 +112,25 @@ const nameFields = (g: GooglePerson): Stated[] => {
   const fields: Stated[] = []
   const [name] = recs(g.names)
   const full = s(name?.displayName)
+  const [org] = recs(g.organizations)
   if (full !== "") {
     fields.push({ kind: "name", value: full })
+  } else if (s(org?.name) !== "") {
+    fields.push({ kind: "name", value: s(org?.name) })
+  }
+  if (s(name?.givenName) !== "") {
+    fields.push({ kind: "given", value: s(name?.givenName) })
+  }
+  if (s(name?.familyName) !== "") {
+    fields.push({ kind: "family", value: s(name?.familyName) })
   }
   for (const n of recs(g.nicknames)) {
     if (s(n.value) !== "") {
-      fields.push({ kind: "name", value: s(n.value), label: "nickname" })
+      fields.push({ kind: "nickname", value: s(n.value) })
     }
   }
-  const [org] = recs(g.organizations)
   if (s(org?.name) !== "") {
     fields.push({ kind: "company", value: s(org?.name) })
-    if (full === "") {
-      fields.push({ kind: "name", value: s(org?.name) })
-    }
   }
   if (s(org?.title) !== "") {
     fields.push({ kind: "role", value: s(org?.title) })
@@ -182,13 +193,80 @@ const otherFields = (g: GooglePerson): Stated[] => {
   return [...fields, ...birthday(g)]
 }
 
-export const toRecord = (g: GooglePerson): SourceRecord => ({
+/** The labels a contact is under, by their names: the user's own groups, not Google's. */
+const groupFields = (g: GooglePerson, names: ReadonlyMap<string, string>): Stated[] =>
+  recs(g.memberships).flatMap((m) => {
+    const name = names.get(s(rec(m.contactGroupMembership).contactGroupResourceName))
+    return name === undefined || name === SWITCH_LABEL
+      ? []
+      : [{ kind: "group" as const, value: name }]
+  })
+
+export const toRecord = (g: GooglePerson, groups: ReadonlyMap<string, string>): SourceRecord => ({
   source: "google",
   ref: { service: "google", value: g.resourceName },
-  fields: [...nameFields(g), ...reachFields(g), ...otherFields(g)],
+  fields: [...nameFields(g), ...reachFields(g), ...otherFields(g), ...groupFields(g, groups)],
   user: true,
   create: true,
 })
+
+/** The label Switch puts the contacts it makes under. */
+export const SWITCH_LABEL = "Switch"
+
+/** The user's own labels: resource name → name. */
+export const googleGroups = Effect.tryPromise({
+  try: async () => {
+    const r = rec(await api("GET", "/contactGroups?pageSize=1000"))
+    const out = new Map<string, string>()
+    for (const g of recs(r.contactGroups)) {
+      if (g.groupType === "USER_CONTACT_GROUP" && s(g.name) !== "") {
+        out.set(s(g.resourceName), s(g.name))
+      }
+    }
+    return out
+  },
+  catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+})
+
+/** Every saved contact, as records, with their labels. */
+export const googleBook = Effect.gen(function* reading() {
+  const people = yield* googlePeople
+  const groups = yield* googleGroups
+  return people.map((g) => toRecord(g, groups))
+})
+
+/** A label's resource name, made if there isn't one. */
+export const googleGroupNamed = (name: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const r = rec(await api("GET", "/contactGroups?pageSize=1000"))
+      const found = recs(r.contactGroups).find(
+        (g) => g.groupType === "USER_CONTACT_GROUP" && s(g.name) === name,
+      )
+      if (found !== undefined) {
+        return s(found.resourceName)
+      }
+      const made = rec(await api("POST", "/contactGroups", { contactGroup: { name } }))
+      return s(made.resourceName)
+    },
+    catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+  })
+
+/** Puts contacts under a label, or takes them out. */
+export const googleGroupMembers = (
+  group: string,
+  add: readonly string[],
+  remove: readonly string[],
+) =>
+  Effect.tryPromise({
+    try: async () => {
+      await api("POST", `/${group}/members:modify`, {
+        resourceNamesToAdd: add,
+        resourceNamesToRemove: remove,
+      })
+    },
+    catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+  })
 
 export const googleGet = (resource: string) =>
   Effect.tryPromise({
@@ -216,14 +294,7 @@ const groupOf = async () => {
   if (switchGroup !== null) {
     return switchGroup
   }
-  const r = rec(await api("GET", "/contactGroups?pageSize=200"))
-  const found = recs(r.contactGroups).find((g) => g.name === "Switch")
-  if (found !== undefined) {
-    switchGroup = s(found.resourceName)
-    return switchGroup
-  }
-  const made = rec(await api("POST", "/contactGroups", { contactGroup: { name: "Switch" } }))
-  switchGroup = s(made.resourceName)
+  switchGroup = await Effect.runPromise(googleGroupNamed(SWITCH_LABEL))
   return switchGroup
 }
 
@@ -238,6 +309,22 @@ export const googleCreate = (body: Json) =>
           memberships: [{ contactGroupMembership: { contactGroupResourceName: group } }],
         }),
       )
+    },
+    catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+  })
+
+/** A deleted contact made again from the copy kept when it went, under the labels it had. */
+export const googleRestore = (copy: Json) =>
+  Effect.tryPromise({
+    try: async () => {
+      const body: Json = {}
+      for (const [k, v] of Object.entries(copy)) {
+        if (!["resourceName", "etag", "metadata", "photos", "coverPhotos"].includes(k)) {
+          body[k] = v
+        }
+      }
+      body.memberships = recs(copy.memberships).filter((m) => isJson(m.contactGroupMembership))
+      return onePerson(await api("POST", `/people:createContact?personFields=${FIELDS}`, body))
     },
     catch: (e) => (e instanceof Error ? e : new Error(String(e))),
   })

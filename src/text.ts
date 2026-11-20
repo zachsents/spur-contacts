@@ -1,5 +1,7 @@
 // What the spur and its app both need, with nothing to run: matching a query to a person, and a
 // field written the way people read it. No Bun, no log, so the app's view can import it.
+import { parsePhoneNumberFromString } from "libphonenumber-js"
+import type { CountryCode } from "libphonenumber-js"
 
 /** A field as far as matching and showing go. */
 export interface Fact {
@@ -18,6 +20,30 @@ export const phoneKey = (raw: string) => {
     return ""
   }
   return d
+}
+
+/**
+ * A phone in E.164 (`+15550100000`), read in `region` when it has no country code; an extension
+ * kept after `;ext=`. A number that can't be one (a short code) keeps its digits, anything else
+ * stays as written.
+ */
+export const e164 = (raw: string, region: CountryCode = "US") => {
+  const v = raw.trim().replace(/^00(?=[1-9])/u, "+")
+  const p = parsePhoneNumberFromString(v, region)
+  if (p?.isPossible() === true) {
+    return p.ext === undefined ? p.number : `${p.number};ext=${p.ext}`
+  }
+  const digits = v.replaceAll(/\D/gu, "")
+  return /^[\d\s().+-]+$/u.test(v) && digits !== "" ? digits : v
+}
+
+/** A phone as people read it: national within North America, else international. */
+export const prettyPhone = (value: string) => {
+  const p = parsePhoneNumberFromString(value.replace(";ext=", " ext. "), "US")
+  if (p === undefined) {
+    return value
+  }
+  return p.countryCallingCode === "1" ? p.formatNational() : p.formatInternational()
 }
 
 export const tokens = (s: string) =>
@@ -58,6 +84,8 @@ const editsWithin = (a: string, b: string) => {
   return edits + (a.length - i) + (b.length - j) <= 1
 }
 
+const NAMES = new Set(["name", "given", "family", "nickname"])
+
 /** How well `q` fits someone's fields: every word must land in some field, prefix or digits. */
 export const score = (fields: readonly Fact[], q: string) => {
   const words = tokens(q)
@@ -77,7 +105,7 @@ export const score = (fields: readonly Fact[], q: string) => {
     let bestHit = 0
     for (const f of hay) {
       for (const t of tokens(f.value)) {
-        const weight = f.kind === "name" ? 3 : 1
+        const weight = NAMES.has(f.kind) ? 3 : 1
         if (t === w) {
           bestHit = Math.max(bestHit, 2 * weight)
         } else if (t.startsWith(w)) {
@@ -97,6 +125,13 @@ export const score = (fields: readonly Fact[], q: string) => {
 
 export const LABELS: Readonly<Record<string, string>> = {
   name: "Name",
+  given: "Given",
+  family: "Family",
+  initial: "Initial",
+  nickname: "Nickname",
+  type: "Type",
+  group: "Label",
+  relationship: "Relationship",
   phone: "Phone",
   email: "Email",
   handle: "Handle",
@@ -120,8 +155,31 @@ export const SERVICES: Readonly<Record<string, string>> = {
   x: "X",
   facebook: "Facebook",
   github: "GitHub",
+  tiktok: "TikTok",
+  threads: "Threads",
   apple: "Apple",
   google: "Google",
+}
+
+/** Where a profile on each service lives, before the handle. */
+export const SITES: Readonly<Record<string, string>> = {
+  instagram: "https://www.instagram.com/",
+  linkedin: "https://www.linkedin.com/in/",
+  telegram: "https://t.me/",
+  x: "https://x.com/",
+  facebook: "https://www.facebook.com/",
+  github: "https://github.com/",
+  tiktok: "https://www.tiktok.com/@",
+  threads: "https://www.threads.net/@",
+}
+
+/** A handle's profile page, when its service has one. */
+export const profileUrl = (f: Fact & { readonly url?: string }) => {
+  const site = SITES[f.service ?? ""]
+  if (f.kind !== "handle" || site === undefined) {
+    return null
+  }
+  return f.url ?? `${site}${f.value}`
 }
 
 /** A field's label: its kind's, or for a handle its service's. */
@@ -153,8 +211,10 @@ const birthday = (v: string) => {
 /** A field's value as people read it: a phone grouped, a time as its day. */
 export const pretty = (f: Fact) => {
   if (f.kind === "phone") {
-    const d = phoneKey(f.value)
-    return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : f.value
+    return prettyPhone(f.value)
+  }
+  if (f.kind === "initial") {
+    return `${f.value}.`
   }
   if (f.kind === "last_contact") {
     return day(Number(f.value))

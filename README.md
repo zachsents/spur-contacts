@@ -2,9 +2,40 @@
 
 People and companies in one set: the Apple and Google address books, other spurs' contacts and
 everyone who messages the user, merged, with every field's source and confidence. Switch is the
-source of truth: the books are imported once, then get only what Switch adds. Unknown senders are
-looked up in public records. Every change is a batch that can be undone, including what went out
-to Apple or Google. Its widgets: a person card for chat, and newly identified numbers in Home.
+source of truth: each book is imported once (a card merges into someone only on a shared phone,
+email or handle and the same name), then gets what Switch holds. Unknown senders are looked up in
+public records. Every change is a batch that can be undone, including what went out to Apple or
+Google. Its widgets: a person card for chat, and newly identified numbers in Home.
+
+## Fields
+
+Name, given and family name (or the family initial alone), nickname, type (person, company or
+system, or unset), labels, relationship to the user, phones, emails, social handles and links,
+company, role, location, birthday, relations, notes. Every write is made normal, whatever its
+source: phones in E.164 (read in `CONTACTS_REGION`, else the US), names without emoji or styled
+letters and cased when typed all lower or all upper (McX, O'X and particles kept right), a tag
+after a name ("Ann Lee · Acme") moved to a label, and a full name split into given and family when
+that's all there is. The `normalize` tool does it once to everything already there.
+
+## Sync
+
+| Switch | Apple | Google |
+| --- | --- | --- |
+| given, family (or initial) | first, last | given, family |
+| nickname | nickname | nickname |
+| company, role | organization, job title | organization |
+| type | company card (person or company) | — |
+| note | note | biography |
+| phones, emails, links, handles | phones, emails, URLs | phones, emails, URLs |
+| labels | groups | labels |
+| relationship | the Me card's related names | — |
+
+Every two minutes changes go out. A value the book holds that Switch once held too is replaced by
+Switch's; one Switch never saw is the user's edit there, left alone and recorded as a conflict. A
+person merged from several cards in one book keeps the first-linked card, which gets everything;
+the rest are deleted, each kept whole in the log so undo brings it back. Nothing goes to a book
+before it's been imported, and nothing already there changes without a backup of both books from
+the last hour in `contacts-backup/<time>/` (`apple.vcf`, `apple.json`, `google.json`).
 
 A [Switch](https://switch.ax) spur, built on [spur-kit](https://github.com/zachsents/spur-kit).
 
@@ -19,9 +50,9 @@ view (⌘K, Spurs). It runs on a Mac (it reads Contacts through Contacts.app).
 - Allow the host to control Contacts the first time it reads them.
 - Looking up unknown numbers loads pages in the user's browser through the browser spur
   (`github:zachsents/spur-browser#a4e1fda` or later).
-- Then run its `import` tool once. Its loops keep senders and other sources coming in, look up
-  unknown numbers a few a day, and push changes out every two minutes (`CONTACTS_LOOPS=0` turns
-  them off). Its log and state live in `$SWITCH_CONTACTS_DIR`, else `$SWITCH_DIR`, else
+- Apple is imported as soon as Contacts answers, Google as soon as it's connected (or run the
+  `import` tool). Its loops keep senders and other sources coming in, look up unknown numbers a few
+  a day, and push changes out every two minutes (`CONTACTS_LOOPS=0` turns them off). Its log and state live in `$SWITCH_CONTACTS_DIR`, else `$SWITCH_DIR`, else
   `~/.switch`.
 
 Another spur adds people by emitting `<spur>.contact` events with `{ ref, name?, aliases?,

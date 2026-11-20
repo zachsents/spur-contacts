@@ -7,6 +7,7 @@ import { Effect, Schema } from "effect"
 
 import { SCOPE } from "./google.ts"
 
+import { linkCard, normalizeAll, setFields } from "./edit.ts"
 import { enrich } from "./enrich.ts"
 import { mergeByHand } from "./merge.ts"
 import {
@@ -27,9 +28,11 @@ import {
   SenderIdentified,
   SenderUnknown,
   SINGLE,
+  TYPES,
 } from "./model.ts"
 import type { Field, Person } from "./model.ts"
-import { batchId, commit, make, missing } from "./store.ts"
+import { batchId, commit, make, makeAll, missing } from "./store.ts"
+import { backup, linksOf, push } from "./push.ts"
 import { identify, importAll } from "./run.ts"
 import { labelOf, pretty, score } from "./text.ts"
 import { undo } from "./undo.ts"
@@ -76,7 +79,7 @@ const lookedUp = (db: Database, ids: readonly string[]) => {
 const view = (db: Database, p: Person) => {
   const facts: { label: string; value: string }[] = []
   for (const kind of KINDS) {
-    if (kind === "name" || kind === "ref") {
+    if (kind === "name" || kind === "ref" || kind === "group") {
       continue
     }
     const shown = new Set<string>()
@@ -104,6 +107,13 @@ const view = (db: Database, p: Person) => {
   return {
     id: p.id,
     name: nameOf(p),
+    type: best(p, "type") ?? null,
+    labels: [
+      ...new Set(
+        p.fields.filter((f) => f.kind === "group" && f.suggested !== true).map((f) => f.value),
+      ),
+    ],
+    links: linksOf(p),
     facts,
     fields: p.fields.map((f) => ({
       id: f.id,
@@ -123,27 +133,48 @@ const view = (db: Database, p: Person) => {
   }
 }
 
+/** Labels on a person, as written. */
+const labelsOf = (p: Person) => [
+  ...new Set(
+    p.fields.filter((f) => f.kind === "group" && f.suggested !== true).map((f) => f.value),
+  ),
+]
+
 const search = tool(
   "search",
   {
     description:
-      "Find people by any field, fuzzily: name, phone (any digits), email, company, handle, city, note.",
+      "Find people by any field, fuzzily: name, nickname, phone (any digits), email, company, handle, city, note. `label` and `type` (person, company, system, or none for unset) narrow it; with an empty query they list everyone matching them.",
     readOnly: true,
-    input: Schema.Struct({ query: Schema.String, limit: Schema.optionalKey(Schema.Finite) }),
+    input: Schema.Struct({
+      query: Schema.String,
+      label: Schema.optionalKey(Schema.String),
+      type: Schema.optionalKey(Schema.Literals([...TYPES, "none"])),
+      limit: Schema.optionalKey(Schema.Finite),
+    }),
   },
   (input) =>
     Effect.gen(function* searching() {
       const log = yield* Log
       const all = yield* log.read(everyone)
+      const label = input.label?.toLowerCase()
+      const fits = (p: Person) =>
+        (label === undefined || labelsOf(p).some((l) => l.toLowerCase() === label)) &&
+        (input.type === undefined || (best(p, "type") ?? "none") === input.type)
+      const blank = input.query.trim() === ""
       const hits = all
-        .map((p) => ({ p, s: score(p.fields, input.query) }))
+        .filter(fits)
+        .map((p) => ({ p, s: blank ? 1 : score(p.fields, input.query) }))
         .filter((h) => h.s > 0)
-        .toSorted((a, b) => b.s - a.s)
-        .slice(0, Math.min(50, input.limit ?? 10))
+        .toSorted((a, b) => b.s - a.s || nameOf(a.p).localeCompare(nameOf(b.p)))
+        .slice(0, Math.min(500, input.limit ?? (blank ? 100 : 10)))
       return {
         people: hits.map((h) => ({
           id: h.p.id,
           name: nameOf(h.p),
+          nickname: best(h.p, "nickname") ?? null,
+          type: best(h.p, "type") ?? null,
+          labels: labelsOf(h.p),
           phone: best(h.p, "phone") ?? null,
           email: best(h.p, "email") ?? null,
           company: best(h.p, "company") ?? null,
@@ -199,7 +230,7 @@ const update = tool(
   "update",
   {
     description:
-      "Add fields to a person, or remove ones by id. `user`: the user asked for it, which makes the fields theirs (never overwritten) and lets their own fields go. Without it, a field the user set can't be removed. Pass `create` to make a new person.",
+      "Add fields to a person, or remove ones by id (ids from `get`): for what a person has several of, such as phones, emails, handles (`service`: instagram, linkedin, x, tiktok…), links and relations. `set` is for single fields and labels. `user`: the user asked for it, which makes the fields theirs (never overwritten) and lets their own fields go. Without it, a field the user set can't be removed. Pass `create` to make a new person.",
     input: Schema.Struct({
       person: Schema.optionalKey(Schema.String),
       add: Schema.optionalKey(Schema.Array(stated)),
@@ -214,7 +245,7 @@ const update = tool(
       const byUser = input.user === true
       const batch = batchId("update")
       const source = byUser ? "user" : "agent"
-      const added = (input.add ?? []).map((s) => make(s, source, byUser))
+      const added = makeAll(input.add ?? [], source, byUser)
       if (input.create === true) {
         const id = crypto.randomUUID()
         yield* commit(
@@ -250,7 +281,8 @@ const update = tool(
 const merge = tool(
   "merge",
   {
-    description: "Fold people into one: `from` into `into`. Undo splits them again.",
+    description:
+      "Fold people into one: `from` into `into`, every field kept. In Apple and Google, at the next push, the person's first-linked card in each book gets everything and their other cards there are deleted (each kept whole in the log). Undo splits them again and brings deleted cards back.",
     input: Schema.Struct({ into: Schema.String, from: Schema.Array(Schema.String) }),
   },
   (input) =>
@@ -285,9 +317,10 @@ const importTool = tool(
   "import",
   {
     description:
-      "Take every source in: Apple and Google (the first time; after that only new cards), other spurs' contacts and everyone who messages the user. Returns counts per source.",
+      "Take every source in: Apple and Google the first time (`again`: once more, for cards made there since), merged only into someone who surely is the same (a shared phone, email or handle and the same name); other spurs' contacts; and everyone who messages the user. Returns counts per source.",
+    input: Schema.Struct({ again: Schema.optionalKey(Schema.Boolean) }),
   },
-  () => importAll,
+  (input) => importAll(input.again === true),
 )
 
 const identifyTool = tool(
@@ -424,6 +457,8 @@ const peopleTool = tool(
         people: all.map((p) => ({
           id: p.id,
           name: nameOf(p),
+          ...(best(p, "type") === undefined ? {} : { type: best(p, "type") }),
+          labels: labelsOf(p),
           fields: p.fields
             .filter((f) => f.suggested !== true && f.kind !== "ref" && f.kind !== "last_contact")
             .map((f) => ({
@@ -574,6 +609,92 @@ const confirm = tool(
     }),
 )
 
+const nullable = Schema.optionalKey(Schema.NullOr(Schema.String))
+
+const setTool = tool(
+  "set",
+  {
+    description:
+      "Set or clear a person's single fields, replacing whatever they hold, as the user's own (never overwritten by an import; sent to Apple and Google). name (a name set alone also sets given and family from it), given, family, initial (one letter: the family name's initial when that's all that's known; clears family), nickname (what the user calls them), type (person, company or system; leave unset when none fits), relationship (who they are to the user, such as grandmother: Apple's related names), note, company, role, location, birthday (YYYY-MM-DD, or --MM-DD without a year). null clears one. `labels` adds or removes labels (Apple groups, Google labels).",
+    input: Schema.Struct({
+      person: Schema.String,
+      name: nullable,
+      given: nullable,
+      family: nullable,
+      initial: nullable,
+      nickname: nullable,
+      type: Schema.optionalKey(Schema.NullOr(Schema.Literals(TYPES))),
+      relationship: nullable,
+      note: nullable,
+      company: nullable,
+      role: nullable,
+      location: nullable,
+      birthday: nullable,
+      labels: Schema.optionalKey(
+        Schema.Struct({
+          add: Schema.optionalKey(Schema.Array(Schema.String)),
+          remove: Schema.optionalKey(Schema.Array(Schema.String)),
+        }),
+      ),
+    }),
+  },
+  (input) => {
+    const { person, labels, ...settings } = input
+    return setFields(person, settings, labels ?? {})
+  },
+)
+
+const linkTool = tool(
+  "link",
+  {
+    description:
+      "Link a person to a card in Apple (its id, `…:ABPerson`) or Google (`people/c…`), so pushes go to that card; `unlink` takes a link off. A card linked to someone else can't be linked again: merge the two people instead. A person linked to several cards in one book keeps the first and the push deletes the rest after giving the first everything.",
+    input: Schema.Struct({
+      person: Schema.String,
+      target: Schema.Literals(["apple", "google"]),
+      record: Schema.String,
+      unlink: Schema.optionalKey(Schema.Boolean),
+    }),
+  },
+  (input) => linkCard(input.person, input.target, input.record, input.unlink === true),
+)
+
+const normalizeTool = tool(
+  "normalize",
+  {
+    description:
+      "Make every field normal once (phones in E.164, names without emoji and properly cased, full names split into given and family): one batch, undone whole. New writes are made normal on their own.",
+  },
+  () => normalizeAll,
+)
+
+const backupTool = tool(
+  "backup",
+  {
+    description:
+      "Back both address books up whole now: Apple as vCards and JSON (notes and groups included), Google as JSON, in a new folder under contacts-backup.",
+  },
+  () => backup,
+)
+
+const pushTool = tool(
+  "push",
+  {
+    description:
+      "Send what changed to Apple and Google now, instead of at the next two-minute pass. A book gets nothing until it's been imported; anything already there changes only after a backup from the last hour. `dry`: what it would send.",
+    input: Schema.Struct({
+      target: Schema.optionalKey(Schema.Literals(["apple", "google"])),
+      dry: Schema.optionalKey(Schema.Boolean),
+    }),
+  },
+  (input) =>
+    Effect.all(
+      (input.target === undefined ? (["apple", "google"] as const) : [input.target]).map((t) =>
+        push(t, batchId(`push-${t}`), undefined, input.dry === true),
+      ),
+    ).pipe(Effect.map((reports) => ({ reports }))),
+)
+
 const component = (id: string, rest: Record<string, unknown>) => ({ id, ...rest })
 
 export const contactsApp = defineApp<LogService | ModelsService>({
@@ -581,12 +702,17 @@ export const contactsApp = defineApp<LogService | ModelsService>({
   version: "1",
   connections: [{ provider: "google", scopes: [SCOPE], multiple: false }],
   instructions:
-    "The user's people and companies, merged from Apple, Google, other sources and everyone who messages them; Switch is the source of truth and pushes changes out to Apple and Google. Every field keeps its source and confidence; every change is a batch `undo` reverts.",
+    "The user's people and companies, merged from Apple, Google, other sources and everyone who messages them; Switch is the source of truth and pushes changes out to Apple and Google every two minutes. Every field keeps its source and confidence; every change is a batch `undo` reverts, including what it sent. `set` edits single fields and labels; `update` adds or removes list fields (phones, emails, handles, links); `merge` folds duplicates; `link` ties a person to a card.",
   tools: [
     search,
     get,
+    setTool,
     update,
     merge,
+    linkTool,
+    normalizeTool,
+    backupTool,
+    pushTool,
     enrichTool,
     undoTool,
     importTool,

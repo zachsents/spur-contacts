@@ -3,14 +3,23 @@
 import { Log } from "spur-kit"
 import { Effect } from "effect"
 
-import { appleRecords } from "./apple.ts"
-import { googlePeople, toRecord as googleRecord } from "./google.ts"
+import { appleBook } from "./apple.ts"
+import type { Related } from "./apple.ts"
+import { googleBook } from "./google.ts"
 import { take } from "./merge.ts"
-import type { SourceRecord } from "./merge.ts"
-import { best, Imported, readPerson, SenderUnknown } from "./model.ts"
+import type { Matching, SourceRecord } from "./merge.ts"
+import {
+  best,
+  Imported,
+  normOf,
+  PersonUpdated,
+  readPerson,
+  resolve,
+  SenderUnknown,
+} from "./model.ts"
 import { phoneKey } from "./text.ts"
 import { offered } from "./offered.ts"
-import { batchId, commit } from "./store.ts"
+import { batchId, commit, make } from "./store.ts"
 import { fromBrain, fromSwitchboard, gather, toRecord as senderRecord } from "./senders.ts"
 import type { Sender } from "./senders.ts"
 
@@ -26,7 +35,11 @@ export interface Tally {
   readonly batch: string
 }
 
-export const takeAll = (source: string, records: readonly SourceRecord[], useModel = true) =>
+export const takeAll = (
+  source: string,
+  records: readonly SourceRecord[],
+  matching: Matching = "model",
+) =>
   Effect.gen(function* taking() {
     const batch = batchId(`import-${source}`)
     let created = 0
@@ -35,7 +48,7 @@ export const takeAll = (source: string, records: readonly SourceRecord[], useMod
     let asked = 0
     let cost = 0
     for (const r of records) {
-      const o = yield* take(r, batch, `import ${source}`, useModel)
+      const o = yield* take(r, batch, `import ${source}`, matching)
       created += o.created ? 1 : 0
       merged += o.merged
       matched += o.matched ? 1 : 0
@@ -57,20 +70,64 @@ export const takeAll = (source: string, records: readonly SourceRecord[], useMod
     } satisfies Tally
   })
 
-export const importApple = appleRecords.pipe(Effect.flatMap((rs) => takeAll("apple", rs)))
-export const importGoogle = googlePeople.pipe(
-  Effect.flatMap((gs) =>
-    takeAll(
-      "google",
-      gs.map((g) => googleRecord(g)),
-    ),
-  ),
-)
+/**
+ * Who the Me card names as related to the user, as each one's relationship: written where the
+ * name is exactly one person's, among those the import just took in.
+ */
+const relationships = (me: { id: string; related: readonly Related[] } | null, batch: string) =>
+  Effect.gen(function* relating() {
+    const log = yield* Log
+    let set = 0
+    for (const r of me?.related ?? []) {
+      const label = r.label.trim()
+      const id = yield* log.read((db) => {
+        const ids = new Set(
+          db
+            .query<{ person: string }, [string]>(
+              "SELECT person FROM fields WHERE kind = 'name' AND norm = ?",
+            )
+            .all(normOf("name", r.value))
+            .map((x) => resolve(db, x.person))
+            .filter((x) => x !== null),
+        )
+        return ids.size === 1 ? [...ids][0] : undefined
+      })
+      if (label !== "" && id !== undefined) {
+        const p = yield* log.read((db) => readPerson(db, id))
+        const has = p?.fields.some((f) => f.kind === "relationship")
+        if (p !== null && has !== true) {
+          set += 1
+          yield* commit(batch, [
+            PersonUpdated.make({
+              id,
+              added: [make({ kind: "relationship", value: label }, "apple", true)],
+              removed: [],
+              batch,
+              reason: "import apple",
+            }),
+          ])
+        }
+      }
+    }
+    return set
+  })
+
+/** Every card in Apple Contacts, merged only where a card is surely someone already there. */
+export const importApple = Effect.gen(function* importing() {
+  const book = yield* appleBook
+  const tally = yield* takeAll("apple", book.records, "exact")
+  const related = yield* relationships(book.me, tally.batch)
+  return { ...tally, related }
+})
+
+/** Every saved Google contact, the same way. */
+export const importGoogle = googleBook.pipe(Effect.flatMap((rs) => takeAll("google", rs, "exact")))
+
 /** What other spurs publish, one tally per source. */
-export const importOffered = (useModel = true) =>
+export const importOffered = (matching: Matching = "model") =>
   offered.pipe(
     Effect.flatMap((by) =>
-      Effect.forEach([...by], ([source, rs]) => takeAll(source, rs, useModel)),
+      Effect.forEach([...by], ([source, rs]) => takeAll(source, rs, matching)),
     ),
   )
 
@@ -104,7 +161,7 @@ export const importSenders = (cursor: { readonly brain: number; readonly since: 
       )
       const o =
         holder === null
-          ? yield* take({ ...senderRecord(s), create: true }, batch, "senders", false)
+          ? yield* take({ ...senderRecord(s), create: true }, batch, "senders", "keys")
           : { person: holder }
       if (o.person === null) {
         continue

@@ -5,8 +5,17 @@ import { Log } from "spur-kit"
 import type { Draft } from "spur-kit"
 import { Effect } from "effect"
 
-import { Change, contactEvents, keyOf, people, readPerson } from "./model.ts"
+import {
+  Change,
+  contactEvents,
+  keyOf,
+  people,
+  PersonUpdated,
+  readPerson,
+  resolve,
+} from "./model.ts"
 import type { Field, Kind, Person } from "./model.ts"
+import { afterEvents, normalEvents, normalField, partsChange, tagsOf } from "./normal.ts"
 
 /** Beside the brain it tells. */
 export const SWITCH = process.env.SWITCH_DIR ?? path.join(homedir(), ".switch")
@@ -30,7 +39,8 @@ export interface Stated {
   readonly suggested?: boolean
 }
 
-export const make = (s: Stated, source: string, user: boolean, at = Date.now()): Field => ({
+/** A field as a source states it, not yet made normal. */
+const raw = (s: Stated, source: string, user: boolean, at: number): Field => ({
   id: crypto.randomUUID(),
   kind: s.kind,
   value: s.value.trim(),
@@ -44,13 +54,52 @@ export const make = (s: Stated, source: string, user: boolean, at = Date.now()):
   at,
 })
 
-/** Writes one change: its events, checked, in one transaction. */
-export const commit = (batch: string, events: readonly Draft[], byUser = false) =>
+/** A field from what a source states, made normal. */
+export const make = (s: Stated, source: string, user: boolean, at = Date.now()): Field =>
+  normalField(raw(s, source, user, at))
+
+/** Fields from what a source states, made normal, with a tag on a name ("Ann Lee · Acme") as a label. */
+export const makeAll = (
+  stated: readonly Stated[],
+  source: string,
+  user: boolean,
+  at = Date.now(),
+): Field[] => {
+  const fields = stated.map((s) => raw(s, source, user, at))
+  return [...fields.map((f) => normalField(f)), ...tagsOf(fields, [])]
+}
+
+/** Given and family worked out again for everyone the events touch whose name they change. */
+const derived = (batch: string, events: readonly Draft[]) =>
+  Effect.gen(function* deriving() {
+    const log = yield* Log
+    return yield* log.read((db) => {
+      const after = afterEvents(events, (id) => {
+        const live = resolve(db, id)
+        return live === id ? (readPerson(db, id)?.fields ?? null) : null
+      })
+      const out: Draft[] = []
+      for (const [id, fields] of after) {
+        const { added, removed } = partsChange(fields, id)
+        if (added.length > 0 || removed.length > 0) {
+          out.push(PersonUpdated.make({ id, added, removed, batch, reason: "name parts" }))
+        }
+      }
+      return out
+    })
+  })
+
+/** Writes one change: its events made normal, name parts kept up, checked, in one transaction. */
+export const commit = (batch: string, given: readonly Draft[], byUser = false) =>
   Effect.gen(function* committing() {
-    if (events.length === 0) {
+    if (given.length === 0) {
       return 0
     }
     const log = yield* Log
+    const normal = yield* log.read((db) =>
+      normalEvents(given, (id) => readPerson(db, id)?.fields ?? []),
+    )
+    const events = [...normal, ...(yield* derived(batch, normal))]
     const receipt = yield* log.dispatch({
       id: crypto.randomUUID(),
       type: Change.type,

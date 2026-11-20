@@ -1,5 +1,6 @@
 // What the spur remembers between runs, beside its log: cursors into Switch's brain and
-// Switchboard, how far its log has gone out, and today's lookups.
+// Switchboard, how far its log has gone out, today's lookups, and when each address book was
+// first taken in (nothing goes out to a book before that).
 import { readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
@@ -14,9 +15,19 @@ export interface State {
   forwarded: number
   lookups: number[]
   pushedThrough: number
+  /** When each book was imported, as epoch ms. */
+  imported: { apple?: number; google?: number }
 }
 
 const num = (v: unknown) => (typeof v === "number" ? v : 0)
+
+const importedOf = (v: unknown): State["imported"] => {
+  const r = rec(v)
+  return {
+    ...(typeof r.apple === "number" ? { apple: r.apple } : {}),
+    ...(typeof r.google === "number" ? { google: r.google } : {}),
+  }
+}
 
 export const load = (): State => {
   try {
@@ -30,11 +41,20 @@ export const load = (): State => {
       forwarded: num(s.forwarded),
       lookups,
       pushedThrough: num(s.pushedThrough),
+      imported: importedOf(s.imported),
     }
   } catch {
-    return { brain: 0, since: 0, forwarded: 0, lookups: [], pushedThrough: 0 }
+    return { brain: 0, since: 0, forwarded: 0, lookups: [], pushedThrough: 0, imported: {} }
   }
 }
+/** Saves the state; when each book was imported only ever gains, whoever saved last. */
 export const save = (s: State) => {
-  writeFileSync(STATE, JSON.stringify(s))
+  const disk = load().imported
+  writeFileSync(STATE, JSON.stringify({ ...s, imported: { ...disk, ...s.imported } }))
+}
+
+/** Marks a book imported, keeping whatever else changed on disk meanwhile. */
+export const markImported = (book: "apple" | "google") => {
+  const s = load()
+  writeFileSync(STATE, JSON.stringify({ ...s, imported: { ...s.imported, [book]: Date.now() } }))
 }

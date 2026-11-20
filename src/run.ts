@@ -5,8 +5,10 @@ import { Effect, Layer, Schedule, Stream } from "effect"
 
 import { enrich, releaseBrowser } from "./enrich.ts"
 import { importApple, importGoogle, importOffered, importSenders } from "./ingest.ts"
+import { askForGoogle } from "./core.ts"
+import { googleConnected } from "./google.ts"
 import { push } from "./push.ts"
-import { load, save } from "./state.ts"
+import { load, markImported, save } from "./state.ts"
 import type { State } from "./state.ts"
 import { batchId } from "./store.ts"
 
@@ -63,18 +65,56 @@ const fresh = (unknown: readonly { id: string; sender: { firstText: string; last
     return out
   })
 
-/** Apple and Google (once), other sources and senders, with counts. */
-export const importAll = Effect.gen(function* importing() {
-  const state = load()
-  const apple = yield* importApple
-  const google = yield* importGoogle
-  const others = yield* importOffered()
-  const senders = yield* importSenders({ brain: state.brain, since: state.since })
-  state.brain = senders.cursor.brain
-  state.since = senders.cursor.since
-  save(state)
-  return { apple, google, others, senders: senders.tally, unknown: senders.unknown.length }
-})
+const failed = (error: Error) => ({ error: error.message })
+
+/**
+ * Apple and Google, each the first time it can be read (`again`: once more), merged only where a
+ * card is surely someone already there. Google waits for its connection; `ask` asks for it.
+ */
+export const importBooks = (again: boolean, ask: boolean) =>
+  Effect.gen(function* importing() {
+    const { imported } = load()
+    const apple =
+      again || imported.apple === undefined
+        ? yield* importApple.pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                markImported("apple")
+              }),
+            ),
+            Effect.catch((error) => Effect.succeed(failed(error))),
+          )
+        : null
+    const connected = yield* googleConnected
+    if (!connected && ask) {
+      yield* askForGoogle
+    }
+    const google =
+      (again || imported.google === undefined) && connected
+        ? yield* importGoogle.pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                markImported("google")
+              }),
+            ),
+            Effect.catch((error) => Effect.succeed(failed(error))),
+          )
+        : null
+    return { apple, google: connected ? google : { error: "Google isn't connected" } }
+  })
+
+/** The books (each once), other sources and senders, with counts. */
+export const importAll = (again: boolean) =>
+  Effect.gen(function* importing() {
+    const { apple, google } = yield* importBooks(again, true)
+    const others = yield* importOffered()
+    const state = load()
+    const senders = yield* importSenders({ brain: state.brain, since: state.since })
+    state.brain = senders.cursor.brain
+    state.since = senders.cursor.since
+    save(state)
+    return { apple, google, others, senders: senders.tally, unknown: senders.unknown.length }
+  })
 
 /** Looks up to `n` unknown senders, newest first, among everyone no book or lookup has named. */
 export const identify = (n: number) =>
@@ -138,7 +178,7 @@ const every = <E, R>(task: Effect.Effect<unknown, E, R>, interval: Schedule.Sche
 
 /**
  * The log forwarded, and, unless CONTACTS_LOOPS=0: senders every 10 minutes, other sources every
- * hour, changes out every 2.
+ * hour, a book not yet imported every 10 minutes (Google once it's connected), changes out every 2.
  */
 export const background = Layer.effectDiscard(
   Effect.gen(function* starting() {
@@ -147,7 +187,8 @@ export const background = Layer.effectDiscard(
       return
     }
     yield* every(sense, Schedule.spaced("10 minutes"))
-    yield* every(importOffered(false), Schedule.spaced("1 hour"))
+    yield* every(importOffered("keys"), Schedule.spaced("1 hour"))
+    yield* every(importBooks(false, false), Schedule.spaced("10 minutes"))
     yield* every(outward, Schedule.spaced("2 minutes"))
   }),
 )

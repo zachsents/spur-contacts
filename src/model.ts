@@ -5,10 +5,26 @@ import { defineCommand, defineEvent, on } from "spur-kit"
 import type { Draft, Projection } from "spur-kit"
 import { Schema } from "effect"
 
+import { cleanName, composeName } from "./names.ts"
 import { phoneKey } from "./text.ts"
 
 export const KINDS = [
+  /** A full name, as a source states it. */
   "name",
+  /** Given (first) name. */
+  "given",
+  /** Family (last) name. */
+  "family",
+  /** The family name's initial, when that's all that's known: one letter. */
+  "initial",
+  /** What the user calls them, apart from their name. */
+  "nickname",
+  /** person, company or system (an automated sender); unset when it doesn't fit. */
+  "type",
+  /** A label they're under, such as a circle or a business they're from: an address book group. */
+  "group",
+  /** Who they are to the user, in the user's words ("grandmother"). */
+  "relationship",
   "phone",
   "email",
   /** A messaging or social account: `service` says which (imessage, instagram, telegram, linkedin…). */
@@ -33,11 +49,30 @@ export type Kind = (typeof KINDS)[number]
 /** Kinds a person has one of: the best ranked shows. */
 export const SINGLE: ReadonlySet<Kind> = new Set([
   "name",
+  "given",
+  "family",
+  "initial",
+  "nickname",
+  "type",
+  "relationship",
+  "note",
   "company",
   "role",
   "location",
   "birthday",
   "last_contact",
+])
+
+export const TYPES = ["person", "company", "system"] as const
+export type PersonType = (typeof TYPES)[number]
+
+/** Kinds that are a name, matched without case or decoration. */
+export const NAMEISH: ReadonlySet<Kind> = new Set([
+  "name",
+  "given",
+  "family",
+  "nickname",
+  "initial",
 ])
 
 export const field = Schema.Struct({
@@ -46,7 +81,7 @@ export const field = Schema.Struct({
   value: Schema.String,
   label: Schema.optionalKey(Schema.String),
   service: Schema.optionalKey(Schema.String),
-  /** apple, google, a source spur, imessage, gmail, instagram, texts, email, fastpeoplesearch, web, user, agent. */
+  /** apple, google, a source spur, imessage, gmail, instagram, texts, email, fastpeoplesearch, web, user, agent; derived: worked out from their name. */
   source: Schema.String,
   /** Where it was found, when that's a page. */
   url: Schema.optionalKey(Schema.String),
@@ -151,7 +186,12 @@ export const SenderUnknown = defineEvent(
 const TARGETS = ["apple", "google"] as const
 export type Target = (typeof TARGETS)[number]
 
-const write = Schema.Struct({ key: Schema.String, value: Schema.String })
+/** One value written: `was` what it replaced; `value` "" when it was taken out. */
+const write = Schema.Struct({
+  key: Schema.String,
+  value: Schema.String,
+  was: Schema.optionalKey(Schema.String),
+})
 
 /** What went out to an address book: values added to a record, or a record made. */
 export const Pushed = defineEvent(
@@ -165,6 +205,9 @@ export const Pushed = defineEvent(
     written: Schema.Array(write),
     /** Taken back out, by an undo. */
     reverted: Schema.Boolean,
+    /** The record was deleted, folded into another of the same person: `copy` is what it held. */
+    deleted: Schema.optionalKey(Schema.Boolean),
+    copy: Schema.optionalKey(Schema.String),
     ...why,
   }),
 )
@@ -225,6 +268,9 @@ export const normOf = (kind: Kind, value: string, service?: string) => {
   }
   if (kind === "email") {
     return v.toLowerCase()
+  }
+  if (NAMEISH.has(kind)) {
+    return cleanName(v).toLowerCase()
   }
   if (kind === "handle" || kind === "ref") {
     const bare = kind === "handle" ? v.replace(/^@/u, "") : v
@@ -306,8 +352,8 @@ const noteBatch = (db: Database, batch: string, reason: string, at: number) => {
 export const people: Projection = {
   name: "contacts",
   // 2: what went out is kept per record (`remote`), so merging two people pushed to the same
-  // book no longer collides.
-  version: 2,
+  // book no longer collides. 3: names match without case or decoration.
+  version: 3,
   tables: ["people", "fields", "pushed", "conflicts", "batches"],
   create: `
     CREATE TABLE people (id TEXT PRIMARY KEY, created INTEGER NOT NULL, updated INTEGER NOT NULL,
@@ -429,8 +475,31 @@ export const best = (p: Person, kind: Kind) => {
   return top?.value
 }
 
-export const nameOf = (p: Person) =>
-  best(p, "name") ?? best(p, "company") ?? best(p, "phone") ?? best(p, "email") ?? ""
+/** Their name as stated, unlabeled first (an alias or old nickname only when there's nothing else). */
+const statedName = (p: Person) =>
+  ranked(p, "name").find((f) => f.suggested !== true && f.label === undefined)?.value ??
+  best(p, "name")
+
+/** Given, family and initial someone set (not worked out from a name), when there are any. */
+const setParts = (p: Person) => {
+  const own = (kind: Kind) =>
+    ranked(p, kind).find((f) => f.suggested !== true && f.source !== "derived")?.value
+  const parts = { given: own("given"), family: own("family"), initial: own("initial") }
+  return parts.given === undefined && parts.family === undefined ? null : parts
+}
+
+export const nameOf = (p: Person) => {
+  const parts = setParts(p)
+  return (
+    (parts === null ? undefined : composeName(parts)) ??
+    statedName(p) ??
+    best(p, "nickname") ??
+    best(p, "company") ??
+    best(p, "phone") ??
+    best(p, "email") ??
+    ""
+  )
+}
 
 /** The live person `id` points to, following merges. */
 export const resolve = (db: Database, id: string): string | null => {
