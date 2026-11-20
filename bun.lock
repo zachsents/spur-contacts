@@ -301,7 +301,7 @@
 
     "source-map-js": ["source-map-js@1.2.4", "", {}, "sha512-J7ZjMvHd9O1fcT/5V09QWaaSl2BbWx3F6O08spde82Namf9UB0GxRVIPiNbVsdKkoizHiSpTodo3vp2bAy91MA=="],
 
-    "spur-kit": ["spur-kit@github:zachsents/spur-kit#88ffe6c", { "dependencies": { "@modelcontextprotocol/server": "^2.4.0" }, "peerDependencies": { "effect": "^4.1.4" } }, "zachsents-spur-kit-88ffe6c", "sha512-UxGAjGbMAb8h7FFBLkzdQcZMj3cldlHz3ljOHg6i80aMG/TnKe4orOypBeZqEU4o25V26fH8b1qo9697R0d1jA=="],
+    "spur-kit": ["spur-kit@github:zachsents/spur-kit#19fdca6", { "dependencies": { "@modelcontextprotocol/server": "^2.4.0" }, "peerDependencies": { "effect": "^4.1.4" } }, "zachsents-spur-kit-19fdca6", "sha512-kMMlDanXbEjMN20ZycqHpYg+pyRLJKZpJrRnr2RwNiSKPAw1JruY0Yv/WmLjuX/FMQqwJhCb1ruc/9Uu81hpZQ=="],
 
     "string-width": ["string-width@8.3.0", "", { "dependencies": { "get-east-asian-width": "^1.5.0", "strip-ansi": "^7.1.2" } }, "sha512-ZbmZM0JCihQN91dWnxoipT2KOEyHqEyfRXUyjuRhW8b/xnqPDoq4gWEVApTVa9db2wN8mmoikgFBbjh71+cGeQ=="],
 
