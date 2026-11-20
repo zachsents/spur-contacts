@@ -137,6 +137,43 @@ const same = (a: Field, b: Field) => a.kind === b.kind && a.value === b.value
 const stated = (fields: readonly Field[], kinds: readonly Kind[]) =>
   fields.some((f) => kinds.includes(f.kind) && f.source !== "derived" && live(f))
 
+const bestStated = (fields: readonly Field[], kinds: readonly Kind[]) =>
+  fields.find((f) => kinds.includes(f.kind) && f.source !== "derived" && live(f))?.value
+
+/**
+ * The parts of a full name nobody set: all of them from a split when none was set, else only
+ * what's left of the name around the part that was ("Ann Lee" with given Ann set leaves family
+ * Lee; a name that is just the given leaves nothing).
+ */
+const partsLeft = (
+  full: string,
+  fields: readonly Field[],
+  givenSet: boolean,
+  lastSet: boolean,
+): { given?: string; family?: string; initial?: string } | null => {
+  if (!givenSet && !lastSet) {
+    return splitName(full)
+  }
+  const name = normalName(full)
+  const lower = name.toLowerCase()
+  if (givenSet) {
+    const given = normalName(bestStated(fields, ["given"]) ?? "").toLowerCase()
+    const rest = lower.startsWith(`${given} `) ? name.slice(given.length + 1) : ""
+    const last = rest === "" ? null : splitName(`${given} ${rest}`)
+    return last === null
+      ? null
+      : {
+          ...(last.family === undefined ? {} : { family: last.family }),
+          ...(last.initial === undefined ? {} : { initial: last.initial }),
+        }
+  }
+  const lastValue = bestStated(fields, ["family"]) ?? `${bestStated(fields, ["initial"]) ?? ""}.`
+  const last = normalName(lastValue).toLowerCase()
+  const rest = lower.endsWith(` ${last}`) ? name.slice(0, name.length - last.length - 1) : ""
+  const given = rest === "" ? splitName(full)?.given : rest
+  return given === undefined ? null : { given }
+}
+
 /**
  * Given, family or initial worked out from their name, each where nobody set that part (given;
  * family or initial), for a person (not a company or system).
@@ -153,7 +190,7 @@ const wantedParts = (fields: readonly Field[], id: string): Field[] => {
     return []
   }
   const name = ranked(p, "name").find((f) => live(f) && f.label === undefined)
-  const split = name === undefined ? null : splitName(name.value)
+  const split = name === undefined ? null : partsLeft(name.value, fields, givenSet, lastSet)
   if (name === undefined || split === null) {
     return []
   }
