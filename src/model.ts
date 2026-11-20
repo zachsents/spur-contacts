@@ -480,12 +480,24 @@ const statedName = (p: Person) =>
   ranked(p, "name").find((f) => f.suggested !== true && f.label === undefined)?.value ??
   best(p, "name")
 
-/** Given, family and initial someone set (not worked out from a name), when there are any. */
+/** Their name from its parts, once someone set any part (not only worked out from a name). */
+const sure = (f: Field) => f.suggested !== true
+
 const setParts = (p: Person) => {
-  const own = (kind: Kind) =>
-    ranked(p, kind).find((f) => f.suggested !== true && f.source !== "derived")?.value
-  const parts = { given: own("given"), family: own("family"), initial: own("initial") }
-  return parts.given === undefined && parts.family === undefined ? null : parts
+  const set = p.fields.some(
+    (f) =>
+      (f.kind === "given" || f.kind === "family" || f.kind === "initial") &&
+      f.source !== "derived" &&
+      sure(f),
+  )
+  if (!set) {
+    return null
+  }
+  const top = (kind: Kind) => ranked(p, kind).find(sure)?.value
+  const parts = { given: top("given"), family: top("family"), initial: top("initial") }
+  return parts.given === undefined && parts.family === undefined && parts.initial === undefined
+    ? null
+    : parts
 }
 
 export const nameOf = (p: Person) => {

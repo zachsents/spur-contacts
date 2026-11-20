@@ -129,16 +129,23 @@ export const normalEvents = (
     return e
   })
 
-const PARTS: ReadonlySet<Kind> = new Set(["given", "family", "initial"])
-
 const live = (f: Field) => f.suggested !== true
 
 const same = (a: Field, b: Field) => a.kind === b.kind && a.value === b.value
 
-/** Given, family or initial worked out from their name, when nobody set any and they're a person. */
+/** Someone set this part (given, or family or initial) rather than it being worked out. */
+const stated = (fields: readonly Field[], kinds: readonly Kind[]) =>
+  fields.some((f) => kinds.includes(f.kind) && f.source !== "derived" && live(f))
+
+/**
+ * Given, family or initial worked out from their name, each where nobody set that part (given;
+ * family or initial), for a person (not a company or system).
+ */
 const wantedParts = (fields: readonly Field[], id: string): Field[] => {
   const p: Person = { id, created: 0, updated: 0, fields }
-  if (fields.some((f) => PARTS.has(f.kind) && f.source !== "derived" && live(f))) {
+  const givenSet = stated(fields, ["given"])
+  const lastSet = stated(fields, ["family", "initial"])
+  if (givenSet && lastSet) {
     return []
   }
   const type = ranked(p, "type").find(live)?.value
@@ -152,9 +159,9 @@ const wantedParts = (fields: readonly Field[], id: string): Field[] => {
   }
   const out: Field[] = []
   const parts: readonly (readonly [Kind, string | undefined])[] = [
-    ["given", split.given],
-    ["family", split.family],
-    ["initial", split.initial],
+    ["given", givenSet ? undefined : split.given],
+    ["family", lastSet ? undefined : split.family],
+    ["initial", lastSet ? undefined : split.initial],
   ]
   for (const [kind, raw] of parts) {
     const value = raw === undefined ? "" : normalValue(kind, raw).value
