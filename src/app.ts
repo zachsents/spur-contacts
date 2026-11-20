@@ -504,6 +504,7 @@ export const contactsApp = defineApp<LogService | ModelsService>({
         min: { cols: 3, rows: 1 },
         preferred: { cols: 4, rows: 3 },
         grows: true,
+        empty: "hide",
       },
       tool: "identified",
       refresh: [SenderIdentified.type],
