@@ -355,8 +355,8 @@ const history = (target: Target) =>
     const log = yield* Log
     const { all, pushed, conflicted } = yield* log.read((db) => {
       const pushedRows = db
-        .query<{ person: string; key: string; value: string }, [string]>(
-          "SELECT person, key, value FROM pushed WHERE target = ?",
+        .query<{ person: string; remote: string; key: string; value: string }, [string]>(
+          "SELECT person, remote, key, value FROM pushed WHERE target = ?",
         )
         .all(target)
       const conflictRows = db
@@ -366,11 +366,14 @@ const history = (target: Target) =>
         .all(target)
       return { all: everyone(db), pushed: pushedRows, conflicted: conflictRows }
     })
-    const pushedBy = new Map<string, Map<string, string>>()
+    /** By person, then the record it went to: key → value. */
+    const pushedBy = new Map<string, Map<string, Map<string, string>>>()
     for (const r of pushed) {
-      const m = pushedBy.get(r.person) ?? new Map<string, string>()
+      const byRemote = pushedBy.get(r.person) ?? new Map<string, Map<string, string>>()
+      const m = byRemote.get(r.remote) ?? new Map<string, string>()
       m.set(r.key, r.value)
-      pushedBy.set(r.person, m)
+      byRemote.set(r.remote, m)
+      pushedBy.set(r.person, byRemote)
     }
     const conflictBy = new Map<string, Set<string>>()
     for (const c of conflicted) {
@@ -595,7 +598,8 @@ export const push = (target: Target, batch: string, only?: ReadonlySet<string>, 
       if (id !== null && !remotes.has(id)) {
         return []
       }
-      const own = (after ?? { pushedBy }).pushedBy.get(p.id) ?? new Map<string, string>()
+      const own =
+        (after ?? { pushedBy }).pushedBy.get(p.id)?.get(id ?? "") ?? new Map<string, string>()
       const mine = conflictBy.get(p.id) ?? new Set<string>()
       const pl = plan(target, p, id, id === null ? null : (remotes.get(id) ?? null), own, mine)
       return pl.writes.length > 0 || pl.conflicts.length > 0 ? [pl] : []

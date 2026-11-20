@@ -305,7 +305,9 @@ const noteBatch = (db: Database, batch: string, reason: string, at: number) => {
 
 export const people: Projection = {
   name: "contacts",
-  version: 1,
+  // 2: what went out is kept per record (`remote`), so merging two people pushed to the same
+  // book no longer collides.
+  version: 2,
   tables: ["people", "fields", "pushed", "conflicts", "batches"],
   create: `
     CREATE TABLE people (id TEXT PRIMARY KEY, created INTEGER NOT NULL, updated INTEGER NOT NULL,
@@ -318,7 +320,7 @@ export const people: Projection = {
     CREATE INDEX fields_norm ON fields (kind, norm);
     CREATE TABLE pushed (person TEXT NOT NULL, target TEXT NOT NULL, remote TEXT NOT NULL,
       key TEXT NOT NULL, value TEXT NOT NULL, at INTEGER NOT NULL,
-      PRIMARY KEY (person, target, key));
+      PRIMARY KEY (person, target, remote, key));
     CREATE TABLE conflicts (person TEXT NOT NULL, target TEXT NOT NULL, key TEXT NOT NULL,
       ours TEXT NOT NULL, theirs TEXT NOT NULL, at INTEGER NOT NULL,
       PRIMARY KEY (person, target, key));
@@ -356,6 +358,10 @@ export const people: Projection = {
         db.query("UPDATE fields SET person = ? WHERE id = ?").run(p.from, f.id)
       }
       db.query("UPDATE people SET merged_into = NULL WHERE id = ?").run(p.from)
+      // What went out to its own records goes back with it.
+      db.query(
+        "UPDATE pushed SET person = ? WHERE person = ? AND remote IN (SELECT value FROM fields WHERE person = ? AND kind = 'ref')",
+      ).run(p.from, p.into, p.from)
       touch(db, p.into, e.time)
       noteBatch(db, p.batch, p.reason, e.time)
     }),
@@ -366,15 +372,13 @@ export const people: Projection = {
     on(Pushed, (db, p, e) => {
       for (const w of p.written) {
         if (p.reverted) {
-          db.query("DELETE FROM pushed WHERE person = ? AND target = ? AND key = ?").run(
-            p.id,
-            p.target,
-            w.key,
-          )
+          db.query(
+            "DELETE FROM pushed WHERE person = ? AND target = ? AND remote = ? AND key = ?",
+          ).run(p.id, p.target, p.remote, w.key)
         } else {
           db.query(
             `INSERT INTO pushed (person, target, remote, key, value, at) VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT (person, target, key) DO UPDATE SET value = excluded.value, remote = excluded.remote, at = excluded.at`,
+             ON CONFLICT (person, target, remote, key) DO UPDATE SET value = excluded.value, at = excluded.at`,
           ).run(p.id, p.target, p.remote, w.key, w.value, e.time)
         }
       }
