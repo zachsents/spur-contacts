@@ -5,6 +5,8 @@ import { defineCommand, defineEvent, on } from "spur-kit"
 import type { Draft, Projection } from "spur-kit"
 import { Schema } from "effect"
 
+import { phoneKey } from "./text.ts"
+
 export const KINDS = [
   "name",
   "phone",
@@ -215,18 +217,6 @@ export const contactEvents = [
 ]
 
 // Normal forms, for matching.
-
-/** A phone as its last ten digits when North American, else all its digits; "" for a short code. */
-export const phoneKey = (raw: string) => {
-  const d = raw.replaceAll(/\D/gu, "")
-  if (d.length === 11 && d.startsWith("1")) {
-    return d.slice(1)
-  }
-  if (d.length < 10) {
-    return ""
-  }
-  return d
-}
 
 export const normOf = (kind: Kind, value: string, service?: string) => {
   const v = value.trim()

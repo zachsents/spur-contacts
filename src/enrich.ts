@@ -12,13 +12,13 @@ import {
   best,
   Enriched,
   nameOf,
-  phoneKey,
   PersonUpdated,
   readPerson,
   SenderIdentified,
 } from "./model.ts"
 import type { Field, Finding, Person } from "./model.ts"
 import { commit, make, missing } from "./store.ts"
+import { phoneKey } from "./text.ts"
 
 /** At or over this, a finding is written; under it, suggested. */
 export const WRITE = 0.8

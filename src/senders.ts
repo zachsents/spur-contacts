@@ -8,7 +8,7 @@ import { Effect } from "effect"
 
 import { parse, rec, recs, str, strings } from "./json.ts"
 import type { SourceRecord } from "./merge.ts"
-import { phoneKey } from "./model.ts"
+import { phoneKey } from "./text.ts"
 import { SWITCH } from "./store.ts"
 import type { Stated } from "./store.ts"
 

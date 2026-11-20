@@ -14,7 +14,8 @@ import { googleCreate, googleDelete, googleGet, googlePeople, googleUpdate } fro
 import type { GooglePerson } from "./google.ts"
 import { parse, recs, text } from "./json.ts"
 import type { Json } from "./json.ts"
-import { best, Conflicted, everyone, PersonUpdated, phoneKey, Pushed } from "./model.ts"
+import { best, Conflicted, everyone, PersonUpdated, Pushed } from "./model.ts"
+import { phoneKey } from "./text.ts"
 import type { Field, Person, Target } from "./model.ts"
 import { commit, DIR, make } from "./store.ts"
 

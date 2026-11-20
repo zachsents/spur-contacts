@@ -1,24 +1,9 @@
 {
-  "compilerOptions": {
-    "target": "ESNext",
-    "module": "Preserve",
-    "moduleResolution": "bundler",
-    "moduleDetection": "force",
-    "lib": ["ESNext"],
-    "types": ["bun"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "verbatimModuleSyntax": true,
-    "allowImportingTsExtensions": true,
-    "isolatedModules": true,
-    "skipLibCheck": true,
-    "noEmit": true,
-    "erasableSyntaxOnly": true,
-    "exactOptionalPropertyTypes": true
-  },
-  "include": ["src"]
+  // Three programs: the spur, the app's view (DOM) and the app's bun process.
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.spur.json" },
+    { "path": "./tsconfig.view.json" },
+    { "path": "./tsconfig.bun.json" }
+  ]
 }

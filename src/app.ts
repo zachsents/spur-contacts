@@ -1,5 +1,6 @@
 // Contacts as a spur: its tools, its events, and two widgets (a person card for chat, and the people
 // it recently identified, for Home).
+import type { Database } from "bun:sqlite"
 import { defineApp, HOME, Log, SWITCH_CATALOG, tool } from "spur-kit"
 import type { LogService, ModelsService } from "spur-kit"
 import { Effect, Schema } from "effect"
@@ -11,78 +12,68 @@ import { mergeByHand } from "./merge.ts"
 import {
   best,
   contactEvents,
+  Enriched,
   everyone,
   KINDS,
   nameOf,
   normOf,
   PersonCreated,
+  PersonMerged,
+  PersonSplit,
   PersonUpdated,
-  phoneKey,
+  Pushed,
   ranked,
   readPerson,
   SenderIdentified,
+  SenderUnknown,
+  SINGLE,
 } from "./model.ts"
 import type { Field, Person } from "./model.ts"
 import { batchId, commit, make, missing } from "./store.ts"
 import { identify, importAll } from "./run.ts"
+import { labelOf, pretty, score } from "./text.ts"
 import { undo } from "./undo.ts"
 
-const LABELS: Readonly<Record<string, string>> = {
-  phone: "Phone",
-  email: "Email",
-  company: "Company",
-  role: "Role",
-  location: "Location",
-  birthday: "Birthday",
-  relation: "Related",
-  space: "Space",
-  url: "Link",
-  note: "Note",
-  last_contact: "Last",
+/** The live person and everyone merged into them, for what happened to any of them. */
+const family = (db: Database, id: string) => {
+  const ids = [id]
+  for (let i = 0; i < ids.length && ids.length < 500; i += 1) {
+    for (const r of db
+      .query<{ id: string }, [string]>("SELECT id FROM people WHERE merged_into = ?")
+      .all(ids[i] ?? "")) {
+      ids.push(r.id)
+    }
+  }
+  return ids
 }
 
-const SERVICES: Readonly<Record<string, string>> = {
-  instagram: "Instagram",
-  linkedin: "LinkedIn",
-  telegram: "Telegram",
-  imessage: "iMessage",
-  x: "X",
-  facebook: "Facebook",
-  github: "GitHub",
-}
+const inList = (ids: readonly string[]) => ids.map(() => "?").join(", ")
 
-const day = (ms: number) =>
-  new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-/** `1990-07-22` as Jul 22, 1990; `--07-22` as Jul 22. */
-const birthday = (v: string) => {
-  const m = /^(?<year>\d{4}|-)-(?<month>\d{2})-(?<day>\d{2})$/u.exec(v)
-  const month = MONTHS[Number(m?.groups?.month) - 1]
-  if (m?.groups === undefined || month === undefined) {
-    return v
+/** The last lookup of them: when, what it looked at, what it found and wrote, its cost. */
+const lookedUp = (db: Database, ids: readonly string[]) => {
+  const row = db
+    .query<{ payload: string; time: number }, string[]>(
+      `SELECT payload, time FROM events WHERE type = '${Enriched.type}'
+       AND json_extract(payload, '$.id') IN (${inList(ids)})
+       AND json_extract(payload, '$.batch') NOT IN (SELECT batch FROM batches WHERE undone = 1)
+       ORDER BY seq DESC LIMIT 1`,
+    )
+    .get(...ids)
+  if (row === null) {
+    return null
   }
-  const md = `${month} ${Number(m.groups.day)}`
-  return m.groups.year === "-" ? md : `${md}, ${m.groups.year}`
-}
-
-const pretty = (f: Field) => {
-  if (f.kind === "phone") {
-    const d = phoneKey(f.value)
-    return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : f.value
+  const e = Enriched.decode(JSON.parse(row.payload))
+  return {
+    at: row.time,
+    looked: e.looked,
+    found: e.findings.length,
+    written: e.findings.filter((f) => f.written).length,
+    cost: e.cost,
   }
-  if (f.kind === "last_contact") {
-    return day(Number(f.value))
-  }
-  if (f.kind === "birthday") {
-    return birthday(f.value)
-  }
-  return f.value
 }
 
 /** A person as tools answer it: the best of each kind, every field with its source, and suggestions. */
-const view = (p: Person) => {
+const view = (db: Database, p: Person) => {
   const facts: { label: string; value: string }[] = []
   for (const kind of KINDS) {
     if (kind === "name" || kind === "ref") {
@@ -93,20 +84,23 @@ const view = (p: Person) => {
       if (f.suggested === true || (kind === "handle" && f.service === "imessage")) {
         continue
       }
-      const label =
-        kind === "handle"
-          ? (SERVICES[f.service ?? ""] ?? f.service ?? "Handle")
-          : (LABELS[kind] ?? kind)
+      const label = labelOf(f)
       const value = pretty(f)
       if (!shown.has(`${label}:${value}`)) {
         shown.add(`${label}:${value}`)
         facts.push({ label, value })
       }
-      if (["company", "role", "location", "birthday", "last_contact"].includes(kind)) {
+      if (SINGLE.has(kind)) {
         break
       }
     }
   }
+  const ids = family(db, p.id)
+  const conflicts = db
+    .query<{ target: string; key: string; ours: string; theirs: string }, string[]>(
+      `SELECT target, key, ours, theirs FROM conflicts WHERE person IN (${inList(ids)})`,
+    )
+    .all(...ids)
   return {
     id: p.id,
     name: nameOf(p),
@@ -122,83 +116,11 @@ const view = (p: Person) => {
       confidence: f.confidence,
       user: f.user,
       ...(f.suggested === true ? { suggested: true } : {}),
+      at: f.at,
     })),
+    lookup: lookedUp(db, ids),
+    conflicts,
   }
-}
-
-const tokens = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize("NFD")
-    .replaceAll(/[̀-ͯ]/gu, "")
-    .split(/[^a-z0-9@.+_-]+/u)
-    .filter((t) => t !== "")
-
-/** How well `q` fits a person: every word must land in some field, prefix or digits. */
-const score = (p: Person, q: string) => {
-  const words = tokens(q)
-  if (words.length === 0) {
-    return 0
-  }
-  const digits = q.replaceAll(/\D/gu, "")
-  let total = 0
-  const hay = p.fields.filter((f) => f.kind !== "ref" && f.kind !== "last_contact")
-  if (
-    digits.length >= 4 &&
-    hay.some((f) => f.kind === "phone" && phoneKey(f.value).includes(digits))
-  ) {
-    return 10
-  }
-  for (const w of words) {
-    let bestHit = 0
-    for (const f of hay) {
-      for (const t of tokens(f.value)) {
-        const weight = f.kind === "name" ? 3 : 1
-        if (t === w) {
-          bestHit = Math.max(bestHit, 2 * weight)
-        } else if (t.startsWith(w)) {
-          bestHit = Math.max(bestHit, 1.5 * weight)
-        } else if (w.length >= 4 && (t.includes(w) || editsWithin(t, w))) {
-          bestHit = Math.max(bestHit, 0.8 * weight)
-        }
-      }
-    }
-    if (bestHit === 0) {
-      return 0
-    }
-    total += bestHit
-  }
-  return total
-}
-
-/** One typo: a letter off, in or out. */
-const editsWithin = (a: string, b: string) => {
-  if (Math.abs(a.length - b.length) > 1) {
-    return false
-  }
-  let i = 0
-  let j = 0
-  let edits = 0
-  while (i < a.length && j < b.length) {
-    if (a[i] === b[j]) {
-      i += 1
-      j += 1
-    } else {
-      edits += 1
-      if (edits > 1) {
-        return false
-      }
-      if (a.length > b.length) {
-        i += 1
-      } else if (b.length > a.length) {
-        j += 1
-      } else {
-        i += 1
-        j += 1
-      }
-    }
-  }
-  return edits + (a.length - i) + (b.length - j) <= 1
 }
 
 const search = tool(
@@ -214,7 +136,7 @@ const search = tool(
       const log = yield* Log
       const all = yield* log.read(everyone)
       const hits = all
-        .map((p) => ({ p, s: score(p, input.query) }))
+        .map((p) => ({ p, s: score(p.fields, input.query) }))
         .filter((h) => h.s > 0)
         .toSorted((a, b) => b.s - a.s)
         .slice(0, Math.min(50, input.limit ?? 10))
@@ -261,7 +183,7 @@ const get = tool(
       if (p === null) {
         return yield* Effect.fail(new Error(`No one matches ${input.person}`))
       }
-      return view(p)
+      return yield* log.read((db) => view(db, p))
     }),
 )
 
@@ -400,44 +322,244 @@ const logTool = tool(
     }),
 )
 
+/** Their name came from a lookup the user hasn't made theirs yet. */
+const unsure = (p: Person) => !p.fields.some((f) => f.kind === "name" && f.user)
+
 const identified = tool(
   "identified",
   {
-    description: "People recently identified from an unsaved number, newest first.",
+    description:
+      "People recently identified from an unsaved number, newest first: `queue` holds those the user hasn't kept (`confirm`) or undone, `waiting` unknown numbers not looked up yet.",
     readOnly: true,
   },
   () =>
     Effect.gen(function* listing() {
       const log = yield* Log
-      const rows = yield* log.read((db) =>
-        db
-          .query<{ payload: string }, []>(
-            `SELECT payload FROM events WHERE type = '${SenderIdentified.type}' ORDER BY seq DESC LIMIT 40`,
+      return yield* log.read((db) => {
+        const undone = new Set(
+          db
+            .query<{ batch: string }, []>("SELECT batch FROM batches WHERE undone = 1")
+            .all()
+            .map((b) => b.batch),
+        )
+        const seen = new Set<string>()
+        const people = []
+        const queue = []
+        for (const r of db
+          .query<{ payload: string; time: number }, []>(
+            `SELECT payload, time FROM events WHERE type = '${SenderIdentified.type}' ORDER BY seq DESC LIMIT 200`,
           )
-          .all()
-          .flatMap((r) => {
-            const e = SenderIdentified.decode(JSON.parse(r.payload))
-            const p = readPerson(db, e.id)
-            return p
-              ? [
-                  {
-                    id: p.id,
-                    name: nameOf(p),
-                    phone: pretty(make({ kind: "phone", value: e.handle }, "", false)),
-                  },
-                ]
-              : []
-          }),
-      )
-      const seen = new Set<string>()
-      const people = []
-      for (const r of rows) {
-        if (!seen.has(r.id)) {
-          seen.add(r.id)
-          people.push(r)
+          .all()) {
+          const e = SenderIdentified.decode(JSON.parse(r.payload))
+          const p = undone.has(e.batch) ? null : readPerson(db, e.id)
+          if (p === null || seen.has(p.id)) {
+            continue
+          }
+          seen.add(p.id)
+          const phone = pretty({ kind: "phone", value: e.handle })
+          people.push({ id: p.id, name: nameOf(p), phone })
+          if (unsure(p)) {
+            queue.push({
+              id: p.id,
+              name: nameOf(p),
+              phone,
+              source: e.source,
+              url: e.url,
+              confidence: e.confidence,
+              batch: e.batch,
+              at: r.time,
+              fields: p.fields
+                .filter((f) => f.kind === "name" && !f.user && f.source === e.source)
+                .map((f) => f.id),
+            })
+          }
         }
+        const waiting = []
+        for (const r of db
+          .query<{ payload: string; time: number }, []>(
+            `SELECT payload, time FROM events WHERE type = '${SenderUnknown.type}' ORDER BY seq DESC LIMIT 200`,
+          )
+          .all()) {
+          const e = SenderUnknown.decode(JSON.parse(r.payload))
+          const p = readPerson(db, e.id)
+          if (p === null || seen.has(p.id) || best(p, "name") !== undefined || lookedUp(db, [p.id])) {
+            continue
+          }
+          seen.add(p.id)
+          waiting.push({
+            id: p.id,
+            phone: pretty({ kind: "phone", value: e.handle }),
+            channel: e.channel,
+            at: r.time,
+          })
+        }
+        return {
+          people: people.slice(0, 12),
+          empty: people.length === 0 ? "Nobody" : "",
+          queue,
+          waiting,
+        }
+      })
+    }),
+)
+
+const peopleTool = tool(
+  "people",
+  {
+    description:
+      "Everyone, with their fields' kinds and values (no suggestions or records): a client's own list, searched as it types.",
+    readOnly: true,
+    appOnly: true,
+  },
+  () =>
+    Effect.gen(function* listing() {
+      const log = yield* Log
+      const all = yield* log.read(everyone)
+      return {
+        people: all.map((p) => ({
+          id: p.id,
+          name: nameOf(p),
+          fields: p.fields
+            .filter((f) => f.suggested !== true && f.kind !== "ref" && f.kind !== "last_contact")
+            .map((f) => ({
+              kind: f.kind,
+              value: f.value,
+              ...(f.service === undefined ? {} : { service: f.service }),
+            })),
+        })),
       }
-      return { people: people.slice(0, 12), empty: people.length === 0 ? "Nobody" : "" }
+    }),
+)
+
+const fact = (f: Field) => ({
+  kind: f.kind,
+  value: f.value,
+  ...(f.service === undefined ? {} : { service: f.service }),
+})
+
+interface Change {
+  batch: string
+  reason: string
+  at: number
+  undone: boolean
+  created: boolean
+  added: ReturnType<typeof fact>[]
+  removed: ReturnType<typeof fact>[]
+  merged: string[]
+  split: string[]
+  sent: string[]
+  found: number
+}
+
+const history = tool(
+  "history",
+  {
+    description:
+      "What happened to one person, newest first, a batch at a time: fields added and removed, merges and splits, lookups, what went out to Apple or Google. Each batch can be undone.",
+    readOnly: true,
+    input: Schema.Struct({ person: Schema.String, limit: Schema.optionalKey(Schema.Finite) }),
+  },
+  (input) =>
+    Effect.gen(function* reading() {
+      const log = yield* Log
+      return yield* log.read((db) => {
+        const live = readPerson(db, input.person)
+        if (live === null) {
+          return { changes: [] }
+        }
+        const ids = family(db, live.id)
+        const list = inList(ids)
+        const rows = db
+          .query<
+            { type: string; payload: string; time: number; reason: string; undone: number },
+            string[]
+          >(
+            `SELECT e.type, e.payload, e.time, b.reason, b.undone FROM events e
+             JOIN batches b ON b.batch = json_extract(e.payload, '$.batch')
+             WHERE json_extract(e.payload, '$.id') IN (${list})
+               OR json_extract(e.payload, '$.into') IN (${list})
+               OR json_extract(e.payload, '$.from') IN (${list})
+             ORDER BY e.seq DESC LIMIT 2000`,
+          )
+          .all(...ids, ...ids, ...ids)
+        const byBatch = new Map<string, Change>()
+        for (const r of rows) {
+          const raw: unknown = JSON.parse(r.payload)
+          const batch = typeof raw === "object" && raw !== null ? Reflect.get(raw, "batch") : ""
+          if (typeof batch !== "string") {
+            continue
+          }
+          let c = byBatch.get(batch)
+          if (c === undefined) {
+            c = {
+              batch,
+              reason: r.reason,
+              at: r.time,
+              undone: r.undone === 1,
+              created: false,
+              added: [],
+              removed: [],
+              merged: [],
+              split: [],
+              sent: [],
+              found: 0,
+            }
+            byBatch.set(batch, c)
+          }
+          if (r.type === PersonCreated.type) {
+            c.created = true
+            c.added.push(...PersonCreated.decode(raw).fields.map(fact))
+          } else if (r.type === PersonUpdated.type) {
+            const e = PersonUpdated.decode(raw)
+            c.added.push(...e.added.map(fact))
+            c.removed.push(...e.removed.map(fact))
+          } else if (r.type === PersonMerged.type) {
+            const e = PersonMerged.decode(raw)
+            c.merged.push(e.fields.find((f) => f.kind === "name")?.value ?? e.from)
+          } else if (r.type === PersonSplit.type) {
+            const e = PersonSplit.decode(raw)
+            c.split.push(e.fields.find((f) => f.kind === "name")?.value ?? e.from)
+          } else if (r.type === Pushed.type) {
+            const e = Pushed.decode(raw)
+            if (!c.sent.includes(e.target)) {
+              c.sent.push(e.target)
+            }
+          } else if (r.type === Enriched.type) {
+            c.found += Enriched.decode(raw).findings.length
+          }
+        }
+        return { changes: [...byBatch.values()].slice(0, Math.min(200, input.limit ?? 50)) }
+      })
+    }),
+)
+
+const confirm = tool(
+  "confirm",
+  {
+    description:
+      "Make fields the user's, as sure: an identified name or a suggestion they keep. Theirs are never overwritten, and suggestions start going out to Apple and Google. `fields`: ids from `get`.",
+    input: Schema.Struct({ person: Schema.String, fields: Schema.Array(Schema.String) }),
+  },
+  (input) =>
+    Effect.gen(function* confirming() {
+      const log = yield* Log
+      const p = yield* log.read((db) => readPerson(db, input.person))
+      if (p === null) {
+        return yield* Effect.fail(new Error(`No person ${input.person}`))
+      }
+      const ids = new Set(input.fields)
+      const chosen = p.fields.filter((f) => ids.has(f.id) && (!f.user || f.suggested === true))
+      if (chosen.length === 0) {
+        return yield* Effect.fail(new Error("Nothing to keep"))
+      }
+      const batch = batchId("confirm")
+      const kept = chosen.map((f) => make({ ...f, confidence: 1, suggested: false }, f.source, true))
+      yield* commit(
+        batch,
+        [PersonUpdated.make({ id: p.id, added: kept, removed: chosen, batch, reason: "kept" })],
+        true,
+      )
+      return { id: p.id, batch, kept: kept.length }
     }),
 )
 
@@ -460,6 +582,9 @@ export const contactsApp = defineApp<LogService | ModelsService>({
     identifyTool,
     logTool,
     identified,
+    peopleTool,
+    history,
+    confirm,
   ],
   events: contactEvents,
   widgets: [
