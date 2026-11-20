@@ -1,0 +1,315 @@
+// Everyone who messages the user, from the brain: texts, iMessage, email, Instagram. Switch's brain
+// holds Switchboard's records as `app.observed` once migrated; until then (and while Switchboard
+// still senses) they're read from Switchboard's core with `sb`.
+import { Database } from "bun:sqlite"
+import { existsSync } from "node:fs"
+import path from "node:path"
+import { Effect } from "effect"
+
+import { parse, rec, recs, str, strings } from "./json.ts"
+import type { SourceRecord } from "./merge.ts"
+import { phoneKey } from "./model.ts"
+import { SWITCH } from "./store.ts"
+import type { Stated } from "./store.ts"
+
+/** One record as Switchboard wrote it. */
+export interface Seen {
+  readonly id: string
+  readonly at: number
+  readonly stream: string
+  readonly kind: string
+  readonly space: string | null
+  readonly body: Record<string, unknown>
+}
+
+export const STREAMS = [
+  "comms/imessage",
+  "comms/texts",
+  "comms/email",
+  "comms/gmail",
+  "comms/instagram",
+] as const
+
+export const BRAIN = process.env.SWITCH_BRAIN ?? path.join(SWITCH, "brain.db")
+
+/** Records in Switch's own brain after `after` (its seq). */
+export const fromBrain = (after: number) =>
+  Effect.sync(() => {
+    const none: Seen[] = []
+    if (!existsSync(BRAIN)) {
+      return { seen: none, cursor: after }
+    }
+    const db = new Database(BRAIN, { readwrite: true, create: false })
+    try {
+      const rows = db
+        .query<{ seq: number; id: string; time: number; payload: string }, [number]>(
+          "SELECT seq, id, time, payload FROM events WHERE type = 'app.observed' AND seq > ? AND json_extract(payload, '$.stream') LIKE 'comms/%' ORDER BY seq",
+        )
+        .all(after)
+      const seen = rows.map((r): Seen => {
+        const p = rec(parse(r.payload))
+        return {
+          id: r.id,
+          at: r.time,
+          stream: String(p.stream),
+          kind: String(p.kind),
+          space: typeof p.space === "string" ? p.space : null,
+          body: rec(p.body),
+        }
+      })
+      const head = db.query<{ seq: number | null }, []>("SELECT max(seq) AS seq FROM events").get()
+      return { seen, cursor: head?.seq ?? after }
+    } finally {
+      db.close()
+    }
+  })
+
+const QUERIES: Readonly<Record<string, string>> = {
+  "comms/gmail": 'stream("comms/gmail") | where body.entity startswith "gmail-message"',
+}
+
+/** Records from Switchboard's core since `since` (ms). */
+export const fromSwitchboard = (since: number) =>
+  Effect.forEach(
+    STREAMS,
+    (stream) =>
+      Effect.tryPromise({
+        try: async () => {
+          const base = QUERIES[stream] ?? `stream("${stream}")`
+          const q = `${base} | where at > ${since} | project id, at, kind, about, body`
+          const proc = Bun.spawn(["sb", "query", q], { stdout: "pipe", stderr: "pipe" })
+          const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+          if (code !== 0) {
+            throw new Error(`sb query ${stream} exited ${code}`)
+          }
+          const rows = recs(rec(parse(out)).rows)
+          return rows.map((r): Seen => {
+            const about = strings(r.about)
+            const ws = about.find((a) => a !== null && a.startsWith("ws:")) ?? undefined
+            return {
+              id: String(r.id),
+              at: Number(r.at),
+              stream,
+              kind: String(r.kind),
+              space: ws === undefined ? null : ws.slice(3),
+              body: rec(r.body),
+            }
+          })
+        },
+        catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+      }),
+    { concurrency: 3 },
+  ).pipe(Effect.map((all) => all.flat()))
+
+const MARKETING =
+  /reply stop|text stop|txt stop|stop to (?:end|opt|cancel|unsubscribe)|opt[- ]?out|unsubscribe|verification code|your code is/iu
+
+/** A sender, gathered across their messages. */
+export interface Sender {
+  readonly channel: string
+  /** A phone in E.164, an email, or a username. */
+  readonly handle: string
+  readonly kind: "phone" | "email" | "instagram"
+  names: Set<string>
+  spaces: Set<string>
+  last: number
+  fromThem: number
+  fromUser: number
+  marketing: number
+  /** The user wrote to them, or it's a two-way thread: someone real. */
+  create: boolean
+  firstText: string
+}
+
+const isPhoneName = (v: string) => /^[+\d\s().-]+$/u.test(v)
+
+type Get = (channel: string, kind: Sender["kind"], handle: string) => Sender
+
+const fromIMessage = (r: Seen, get: Get) => {
+  const b = r.body
+  const handle = str(b.handle)
+  // One to one only: group chats say nothing about who a handle is.
+  if (handle === "" || str(b.chat) !== handle) {
+    return
+  }
+  const isPhone = handle.startsWith("+") && phoneKey(handle) !== ""
+  if (!isPhone && !handle.includes("@")) {
+    return
+  }
+  const s = get("imessage", isPhone ? "phone" : "email", handle)
+  s.last = Math.max(s.last, r.at)
+  if (b.from_me === true) {
+    s.fromUser += 1
+    s.create = true
+  } else {
+    s.fromThem += 1
+    const said = str(b.text)
+    if (MARKETING.test(said)) {
+      s.marketing += 1
+    }
+    if (s.firstText === "") {
+      s.firstText = said.slice(0, 200)
+    }
+    const from = str(b.from)
+    if (from !== "" && from !== handle && !isPhoneName(from)) {
+      s.names.add(from)
+    }
+  }
+  if (s.fromThem > 0 && s.marketing < s.fromThem) {
+    s.create = true
+  }
+}
+
+/** A business's text and email conversations: customers, one record each. */
+const fromConversation = (r: Seen, get: Get, channel: "texts" | "email") => {
+  const f = rec(r.body.facts)
+  const handle = channel === "texts" ? str(f.phone) : str(f.email)
+  const s = get(channel, channel === "texts" ? "phone" : "email", handle)
+  s.last = Math.max(s.last, Number(f.last_at ?? r.at))
+  const name = str(f.customer)
+  const named = channel === "texts" ? !isPhoneName(name) : !name.includes("@")
+  if (name !== "" && named) {
+    s.names.add(name)
+  }
+  if (r.space !== null) {
+    s.spaces.add(r.space)
+  }
+  s.fromThem += 1
+  s.create = true
+}
+
+const ADDRESS = /<?(?<address>[^<>\s]+@[^<>\s]+)>?\s*$/u
+
+const fromGmail = (r: Seen, get: Get) => {
+  const f = rec(r.body.facts)
+  const at = Number(f.date ?? r.at)
+  if (f.sent === true) {
+    for (const to of str(f.to).split(",")) {
+      const address = ADDRESS.exec(to.trim())?.groups?.address
+      if (address !== undefined) {
+        const s = get("gmail", "email", address)
+        s.last = Math.max(s.last, at)
+        s.fromUser += 1
+        s.create = true
+        const name = to
+          .replace(/<[^>]*>/u, "")
+          .replaceAll('"', "")
+          .trim()
+        if (name !== "" && !name.includes("@")) {
+          s.names.add(name)
+        }
+      }
+    }
+  } else if (str(f.from_email) !== "") {
+    const s = get("gmail", "email", str(f.from_email))
+    s.last = Math.max(s.last, at)
+    s.fromThem += 1
+    if (str(f.from) !== "" && !str(f.from).includes("@")) {
+      s.names.add(str(f.from))
+    }
+  }
+}
+
+const fromInstagram = (r: Seen, get: Get) => {
+  const f = rec(r.body.facts)
+  for (const p of recs(f.people)) {
+    const user = str(p.username)
+    if (user === "") {
+      continue
+    }
+    const s = get("instagram", "instagram", user)
+    s.last = Math.max(s.last, Number(f.last_at ?? r.at))
+    if (str(p.name) !== "") {
+      s.names.add(str(p.name))
+    }
+    const msgs = recs(f.messages)
+    s.fromThem += msgs.filter((m) => m.by !== "me").length
+    s.fromUser += msgs.filter((m) => m.by === "me").length
+    if (s.fromUser > 0) {
+      s.create = true
+    }
+  }
+}
+
+export const gather = (seen: readonly Seen[]) => {
+  const by = new Map<string, Sender>()
+  const get: Get = (channel, kind, handle) => {
+    const key = `${kind}:${kind === "phone" ? phoneKey(handle) : handle.toLowerCase()}`
+    let s = by.get(key)
+    if (s === undefined) {
+      s = {
+        channel,
+        handle,
+        kind,
+        names: new Set(),
+        spaces: new Set(),
+        last: 0,
+        fromThem: 0,
+        fromUser: 0,
+        marketing: 0,
+        create: false,
+        firstText: "",
+      }
+      by.set(key, s)
+    }
+    return s
+  }
+  for (const r of seen) {
+    const f = rec(r.body.facts)
+    if (r.stream === "comms/imessage" && r.kind === "message") {
+      fromIMessage(r, get)
+    } else if (r.stream === "comms/texts" && str(f.phone) !== "") {
+      fromConversation(r, get, "texts")
+    } else if (r.stream === "comms/email" && str(f.email) !== "") {
+      fromConversation(r, get, "email")
+    } else if (r.stream === "comms/gmail" && str(f.message_id) !== "") {
+      fromGmail(r, get)
+    } else if (r.stream === "comms/instagram" && f.group !== true) {
+      fromInstagram(r, get)
+    }
+  }
+  return [...by.values()]
+}
+
+/** A role or relay address: a shop's inbox, a no-reply, a marketplace's masked reply-to. */
+const ROLE =
+  /^(?:no-?reply|do-?not-?reply|info|support|hello|help|team|contact|sales|billing|admin|notifications?|news|orders?|mailer-daemon)(?:[+._@-])|-reply\+|^[0-9a-f]{24,}@|^\d+-[a-z0-9.]+@/u
+const RELAY =
+  /@(?:[a-z0-9-]+\.)*(?:craigslist\.org|booking\.com|airbnb\.com|facebookmail\.com|marketplace\.amazon\.com)$/u
+
+/** Mail no one person writes. */
+const automated = (s: Sender) =>
+  s.kind === "email" && (ROLE.test(s.handle.toLowerCase()) || RELAY.test(s.handle.toLowerCase()))
+
+export const toRecord = (s: Sender): SourceRecord => {
+  const fields: Stated[] = []
+  for (const n of s.names) {
+    fields.push({ kind: "name", value: n, confidence: 0.8 })
+  }
+  if (s.kind === "phone") {
+    fields.push({ kind: "phone", value: s.handle })
+    if (s.channel === "imessage") {
+      fields.push({ kind: "handle", value: s.handle, service: "imessage" })
+    }
+  } else if (s.kind === "email") {
+    fields.push({ kind: "email", value: s.handle })
+  } else {
+    fields.push({
+      kind: "handle",
+      value: s.handle,
+      service: "instagram",
+      url: `https://www.instagram.com/${s.handle}/`,
+    })
+  }
+  for (const space of s.spaces) {
+    fields.push({ kind: "space", value: space })
+  }
+  return {
+    source: s.channel,
+    fields,
+    user: false,
+    create: s.create,
+    ...(s.last > 0 ? { lastContact: s.last } : {}),
+    messaged: s.fromThem > s.marketing && !automated(s),
+  }
+}

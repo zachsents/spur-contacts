@@ -1,0 +1,55 @@
+{
+  "name": "spur-contacts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "People and companies from the user's address books, other spurs and everyone who messages them, as a Switch spur.",
+  "license": "MIT",
+  "repository": "github:zachsents/spur-contacts",
+  "type": "module",
+  "scripts": {
+    "start": "bun src/main.ts",
+    "typecheck": "tsgo --noEmit",
+    "lint": "oxlint --type-aware --fix --fix-suggestions",
+    "format": "oxfmt --write .",
+    "fix": "bun run lint && bun run format",
+    "check": "bun run typecheck && bun run fix"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "effect": "^4.1.5",
+    "spur-kit": "github:zachsents/spur-kit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.5",
+    "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
+    "oxlint-tsgolint": "^7.0.2007",
+    "ultracite": "^8.3.1"
+  },
+  "spur": {
+    "name": "contacts",
+    "main": "src/main.ts",
+    "needs": [
+      "macos"
+    ],
+    "connections": [
+      {
+        "provider": "google",
+        "scopes": [
+          "https://www.googleapis.com/auth/contacts"
+        ],
+        "multiple": false
+      }
+    ],
+    "widgets": [
+      "person",
+      "identified"
+    ],
+    "space": {
+      "id": "home",
+      "name": "Home"
+    }
+  }
+}
