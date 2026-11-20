@@ -2,11 +2,13 @@
 // The last line adds one.
 import { useMutation } from "@tanstack/react-query"
 
-import { labelOf, pretty } from "../../../src/text.ts"
+import { labelOf } from "../../../src/text.ts"
 import type { Field, Person } from "../answers.ts"
+import { DETAIL_KINDS, rank } from "../details.ts"
 import { updateMutation } from "../mutations.ts"
 import { AddField } from "./add-field.tsx"
 import { Cells, percent, SourceLink } from "./cells.tsx"
+import { FieldValue } from "./field-value.tsx"
 import { Section, Tip } from "./parts.tsx"
 
 /** The order kinds show in. */
@@ -15,22 +17,17 @@ const ORDER = [
   "phone",
   "email",
   "handle",
-  "company",
-  "role",
   "location",
   "birthday",
   "relation",
   "url",
-  "note",
   "space",
   "last_contact",
 ]
 
-const rank = (f: Field) => (f.user ? 2 : 0) + f.confidence + f.at / 1e15
-
 const shown = (fields: readonly Field[]) =>
   fields
-    .filter((f) => f.kind !== "ref" && f.suggested !== true)
+    .filter((f) => f.kind !== "ref" && f.suggested !== true && !DETAIL_KINDS.has(f.kind))
     .toSorted((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || rank(b) - rank(a))
 
 export const FieldsSection = ({ person }: { person: Person }) => {
@@ -60,7 +57,7 @@ export const FieldsSection = ({ person }: { person: Person }) => {
             </Tip>
           }
         >
-          {pretty(f)}
+          <FieldValue field={f} />
           {f.label !== undefined && <span className="ml-2 text-small text-ink3">{f.label}</span>}
         </Cells>
       ))}

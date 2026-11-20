@@ -13,6 +13,7 @@ import { useSeen } from "../bridge.ts"
 import { enrichKey, enrichMutation } from "../mutations.ts"
 import { identifiedQuery, personQuery } from "../queries.ts"
 import { Boundary } from "./boundary.tsx"
+import { DetailsSection } from "./details-section.tsx"
 import { FieldsSection } from "./fields-section.tsx"
 import { HistorySection } from "./history-section.tsx"
 import { IdentifiedSection } from "./identified-section.tsx"
@@ -55,6 +56,9 @@ export const PersonPage = ({ person }: { person: string }) => {
           <IdentifiedSection queued={queued} />
         </Boundary>
       )}
+      <Boundary>
+        <DetailsSection person={p} />
+      </Boundary>
       <Boundary>
         <FieldsSection person={p} />
       </Boundary>

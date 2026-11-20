@@ -6,7 +6,7 @@ import { Suspense, useRef, useState } from "react"
 
 import type { Command } from "../shared/commands.ts"
 import { useBridge } from "./bridge.ts"
-import { searchForm } from "./forms.ts"
+import { KIND_FILTERS, NO_SEARCH, searchForm } from "./forms.ts"
 import { useListing } from "./listing.ts"
 import {
   confirmMutation,
@@ -21,6 +21,7 @@ import { currentRoute, openChanges, openPeople, openPerson, useRoute } from "./r
 import { Band } from "./ui/band.tsx"
 import { Boundary } from "./ui/boundary.tsx"
 import { ChangesPage } from "./ui/changes-page.tsx"
+import { FilterSelect } from "./ui/filter-select.tsx"
 import { Runner, Stop } from "./ui/marks.tsx"
 import { MergePage } from "./ui/merge-page.tsx"
 import { NewPerson } from "./ui/new-person.tsx"
@@ -36,13 +37,20 @@ const shownOf = (open: string) => {
   return { id: p?.id ?? open, name: p?.name ?? "" }
 }
 
+const TYPE_FILTERS = [
+  { value: "person", label: "Person" },
+  { value: "company", label: "Company" },
+  { value: "system", label: "System" },
+  { value: "none", label: "None" },
+]
+
 /** Commands with nothing but their kind. */
 type Simple = Exclude<Command["kind"], "open" | "search" | "pick">
 
 export const App = () => {
   const route = useRoute()
-  const form = useForm({ defaultValues: { query: "" }, validators: { onChange: searchForm } })
-  const query = useSelector(form.store, (f) => f.values.query)
+  const form = useForm({ defaultValues: NO_SEARCH, validators: { onChange: searchForm } })
+  const searched = useSelector(form.store, (f) => f.values)
   const search = useRef<HTMLInputElement>(null)
   const [picked, setPicked] = useState<readonly string[]>([])
   const [making, setMaking] = useState(false)
@@ -66,7 +74,7 @@ export const App = () => {
       )}
     </span>
   )
-  const { lines, order, error } = useListing(query, lookUpAll)
+  const { lines, labels, order, error } = useListing(searched, lookUpAll)
   const open = route.page === "people" ? (route.person ?? order[0] ?? null) : null
   const lookup = useMutation(enrichMutation(open ?? ""))
   const enriching = useMutationState({
@@ -235,6 +243,8 @@ export const App = () => {
                       } else if (e.key === "Escape") {
                         if (picked.length > 0) {
                           setPicked([])
+                        } else if (field.state.value === "") {
+                          form.reset()
                         } else {
                           field.handleChange("")
                         }
@@ -245,6 +255,32 @@ export const App = () => {
                 )}
               </form.Field>
             </form>
+          }
+          filters={
+            <div className="flex h-line flex-none hairline-b">
+              <form.Field name="type">
+                {(field) => (
+                  <FilterSelect
+                    label="Type"
+                    value={field.state.value}
+                    options={TYPE_FILTERS}
+                    onChange={(v) => {
+                      field.handleChange(KIND_FILTERS.find((k) => k === v) ?? "")
+                    }}
+                  />
+                )}
+              </form.Field>
+              <form.Field name="label">
+                {(field) => (
+                  <FilterSelect
+                    label="Label"
+                    value={field.state.value}
+                    options={labels.map((l) => ({ value: l, label: l }))}
+                    onChange={field.handleChange}
+                  />
+                )}
+              </form.Field>
+            </div>
           }
           lines={lines}
           open={open}

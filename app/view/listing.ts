@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 
 import { score } from "../../src/text.ts"
-import type { Listed } from "./answers.ts"
+import type { Listed, Queued, Waiting } from "./answers.ts"
+import type { KindFilter } from "./forms.ts"
 import { identifiedQuery, peopleQuery } from "./queries.ts"
 
 export type Line =
@@ -41,37 +42,72 @@ const person = (section: string, p: { id: string; name: string }, detail?: strin
     ? { kind: "person", key: `${section}:${p.id}`, id: p.id, name: p.name }
     : { kind: "person", key: `${section}:${p.id}`, id: p.id, name: p.name, detail }
 
-export const useListing = (query: string, lookUpAll: ReactNode) => {
-  const people = useQuery(peopleQuery)
-  const identified = useQuery(identifiedQuery)
-  const everyone = people.data ?? []
-  const lines: Line[] = []
-  if (query.trim() === "") {
-    const queue = identified.data?.queue ?? []
-    const waiting = identified.data?.waiting ?? []
-    if (queue.length > 0) {
-      lines.push({
-        kind: "head",
-        key: "h:identified",
-        label: "Identified",
-        count: queue.length,
-        mark: "hand",
-      })
-      for (const q of queue) {
-        lines.push(person("identified", q, q.phone))
+/** Every label anyone has, as first written, in order. */
+export const labelsIn = (everyone: readonly Listed[]) => {
+  const seen = new Map<string, string>()
+  for (const p of everyone) {
+    for (const l of p.labels ?? []) {
+      if (!seen.has(l.toLowerCase())) {
+        seen.set(l.toLowerCase(), l)
       }
     }
-    if (waiting.length > 0) {
-      lines.push({
-        kind: "head",
-        key: "h:unknown",
-        label: "Unknown",
-        count: waiting.length,
-        action: lookUpAll,
-      })
-      for (const w of waiting) {
-        lines.push(person("unknown", { id: w.id, name: w.phone }))
-      }
+  }
+  return [...seen.values()].toSorted((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" }),
+  )
+}
+
+const fits = (p: Listed, label: string, type: KindFilter) =>
+  (label === "" || (p.labels ?? []).some((l) => l.toLowerCase() === label.toLowerCase())) &&
+  (type === "" || (p.type ?? "none") === type)
+
+/** The identified queue and the numbers still unknown, each under its heading. */
+const waitingLines = (
+  { queue, waiting }: { readonly queue: readonly Queued[]; readonly waiting: readonly Waiting[] },
+  lookUpAll: ReactNode,
+) => {
+  const lines: Line[] = []
+  if (queue.length > 0) {
+    lines.push({
+      kind: "head",
+      key: "h:identified",
+      label: "Identified",
+      count: queue.length,
+      mark: "hand",
+    })
+    for (const q of queue) {
+      lines.push(person("identified", q, q.phone))
+    }
+  }
+  if (waiting.length > 0) {
+    lines.push({
+      kind: "head",
+      key: "h:unknown",
+      label: "Unknown",
+      count: waiting.length,
+      action: lookUpAll,
+    })
+    for (const w of waiting) {
+      lines.push(person("unknown", { id: w.id, name: w.phone }))
+    }
+  }
+  return lines
+}
+
+export const useListing = (
+  { query, label, type }: { query: string; label: string; type: KindFilter },
+  lookUpAll: ReactNode,
+) => {
+  const people = useQuery(peopleQuery)
+  const identified = useQuery(identifiedQuery)
+  const all = people.data ?? []
+  const labels = labelsIn(all)
+  const filtered = label !== "" || type !== ""
+  const everyone = filtered ? all.filter((p) => fits(p, label, type)) : all
+  const lines: Line[] = []
+  if (query.trim() === "") {
+    if (!filtered && identified.data) {
+      lines.push(...waitingLines(identified.data, lookUpAll))
     }
     lines.push({ kind: "head", key: "h:people", label: "People", count: everyone.length })
     for (const p of everyone.toSorted(byName)) {
@@ -97,5 +133,5 @@ export const useListing = (query: string, lookUpAll: ReactNode) => {
     }
   }
   const error = people.error ?? identified.error
-  return { lines, order: [...order], error: error === null ? null : error.message }
+  return { lines, labels, order: [...order], error: error === null ? null : error.message }
 }

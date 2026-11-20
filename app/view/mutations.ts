@@ -3,6 +3,7 @@
 import { mutationOptions } from "@tanstack/react-query"
 
 import { Done } from "./answers.ts"
+import type { PersonType } from "./answers.ts"
 import { call } from "./core.ts"
 import { queryClient } from "./query.ts"
 import { CONTACTS } from "./queries.ts"
@@ -25,6 +26,29 @@ export const updateMutation = mutationOptions({
     remove?: readonly string[]
     create?: boolean
   }) => await call("update", { ...input, user: true }, Done),
+  onSettled: settle,
+})
+
+/** Single fields `set` takes; null clears one. */
+export type Settable =
+  | "given"
+  | "family"
+  | "initial"
+  | "nickname"
+  | "relationship"
+  | "note"
+  | "company"
+  | "role"
+
+/** Single fields set or cleared whole, and labels on and off, as the user's own. */
+export const setMutation = mutationOptions({
+  mutationKey: [...CONTACTS, "set"],
+  mutationFn: async (
+    input: { person: string } & Partial<Record<Settable, string | null>> & {
+        type?: PersonType | null
+        labels?: { add?: readonly string[]; remove?: readonly string[] }
+      },
+  ) => await call("set", input, Done),
   onSettled: settle,
 })
 

@@ -1,4 +1,4 @@
-// The list beside the person: the search as its top cell, then the identified queue, the numbers
+// The list beside the person: the search as its top cell, its filters under it, then the identified queue, the numbers
 // still unknown and everyone, or with a search only who matches, best first. Drawn only where
 // it's in view (TanStack Virtual).
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -14,6 +14,7 @@ const LINE = 36
 
 export const Side = ({
   search,
+  filters,
   lines,
   open,
   picked,
@@ -23,6 +24,7 @@ export const Side = ({
   onPick,
 }: {
   search: ReactNode
+  filters: ReactNode
   lines: readonly Line[]
   open: string | null
   picked: readonly string[]
@@ -42,6 +44,7 @@ export const Side = ({
   return (
     <nav className="flex min-h-0 w-board flex-none flex-col bg-paper rule-r">
       {search}
+      {filters}
       {error !== null && (
         <div className="flex h-line items-center gap-2.5 px-inset text-small text-ink hairline-b">
           <Stop size={12} />

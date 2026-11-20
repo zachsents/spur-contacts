@@ -148,6 +148,19 @@ body,
     pointer-events: none;
   }
 }
+/* Between cells side by side: the hairline down a cell's right edge. */
+@utility hairline-r {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 1;
+    width: 0.5px;
+    background: var(--color-hair);
+    pointer-events: none;
+  }
+}
 @utility rule-b {
   border-bottom: 1px solid var(--color-hair);
 }

@@ -8,9 +8,20 @@ const fact = Schema.Struct({
 })
 export type Fact = typeof fact.Type
 
+/** What a person is, when it's known. */
+export const TYPES = ["person", "company", "system"] as const
+export type PersonType = (typeof TYPES)[number]
+const personType = Schema.Literals(TYPES)
+
 export const People = Schema.Struct({
   people: Schema.Array(
-    Schema.Struct({ id: Schema.String, name: Schema.String, fields: Schema.Array(fact) }),
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.String,
+      type: Schema.optionalKey(personType),
+      labels: Schema.optionalKey(Schema.Array(Schema.String)),
+      fields: Schema.Array(fact),
+    }),
   ),
 })
 export type Listed = (typeof People.Type)["people"][number]
@@ -33,6 +44,11 @@ export type Field = typeof field.Type
 export const Person = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
+  type: Schema.optionalKey(Schema.NullOr(personType)),
+  labels: Schema.optionalKey(Schema.Array(Schema.String)),
+  links: Schema.optionalKey(
+    Schema.Struct({ apple: Schema.Array(Schema.String), google: Schema.Array(Schema.String) }),
+  ),
   fields: Schema.Array(field),
   lookup: Schema.NullOr(
     Schema.Struct({
@@ -97,6 +113,7 @@ export const Identified = Schema.Struct({
   ),
 })
 export type Queued = (typeof Identified.Type)["queue"][number]
+export type Waiting = (typeof Identified.Type)["waiting"][number]
 
 export const Log = Schema.Struct({
   batches: Schema.Array(
