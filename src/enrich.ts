@@ -1,15 +1,14 @@
 // Enrichment: people search for unsaved numbers (FastPeopleSearch, as Switchboard's people-lookup
 // did), and a web search read by a small model for email, company, role and socials. Pages load in
-// the user's Chrome through AQB, politely; each finding keeps its source, URL and confidence, and
+// the user's own browser through the browser spur, politely; each finding keeps its source, URL and confidence, and
 // anything under `WRITE` is only a suggestion.
-import { Client } from "@modelcontextprotocol/client"
-import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import { Log, Models } from "spur-kit"
 import { Effect } from "effect"
 
 import { parse, rec, recs, text as toText } from "./json.ts"
 import { best, Enriched, nameOf, PersonUpdated, readPerson, SenderIdentified } from "./model.ts"
 import type { Field, Finding, Person } from "./model.ts"
+import { coreText } from "./core.ts"
 import { commit, make, missing } from "./store.ts"
 import { phoneKey } from "./text.ts"
 
@@ -20,29 +19,12 @@ const PER_HOUR = 30
 
 // The browser.
 
-let aqb: Client | null = null
 const pages: number[] = []
 let lastPage = 0
 let resting = 0
-
-const browser = async () => {
-  if (aqb !== null) {
-    return aqb
-  }
-  const c = new Client({ name: "switch-contacts", version: "1" })
-  await c.connect(
-    new StdioClientTransport({ command: "zsh", args: ["-lc", "exec aqb mcp"], stderr: "ignore" }),
-  )
-  aqb = c
-  return c
-}
+let opened = false
 
 const SESSION = { session: "switch-contacts", group: "Switch contacts" }
-
-const textOf = (r: unknown) => {
-  const content = recs(rec(r).content)
-  return content.map((c) => (typeof c.text === "string" ? c.text : "")).join("\n")
-}
 
 class BlockedError extends Error {
   override name = "BlockedError"
@@ -64,11 +46,11 @@ const page = async (url: string) => {
   if (wait > 0) {
     await Bun.sleep(wait)
   }
-  const c = await browser()
-  await c.callTool({ name: "browser_navigate", arguments: { url, ...SESSION } })
+  await coreText("browser_act", { op: "navigate", url, ...SESSION })
+  opened = true
   lastPage = Date.now()
   pages.push(lastPage)
-  const text = textOf(await c.callTool({ name: "browser_page_text", arguments: SESSION }))
+  const text = await coreText("browser_act", { op: "text", ...SESSION })
   if (
     /Just a moment|Verify you are human|are you a robot|unusual traffic|captcha/iu.test(
       text.slice(0, 3000),
@@ -81,11 +63,10 @@ const page = async (url: string) => {
 }
 
 export const releaseBrowser = async () => {
-  if (aqb !== null) {
-    // A tab already gone, or a closed connection: nothing left to release.
-    await aqb.callTool({ name: "browser_release", arguments: SESSION }).catch(() => null)
-    await aqb.close().catch(() => null)
-    aqb = null
+  if (opened) {
+    opened = false
+    // A tab already gone, or no browser spur: nothing left to release.
+    await coreText("browser_act", { op: "release", ...SESSION }).catch(() => null)
   }
 }
 

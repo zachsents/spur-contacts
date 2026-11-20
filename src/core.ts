@@ -38,6 +38,24 @@ export const callCore = (name: string, args: Record<string, unknown>) =>
     }
   })
 
+/** Another app's tool, as its words; fails with them when it fails. */
+export const coreText = async (name: string, args: Record<string, unknown>) => {
+  try {
+    connected ??= open()
+    const client = await connected
+    const r = await client.callTool({ name, arguments: args })
+    const content = Array.isArray(r.content) ? r.content : []
+    const words = content.map((c) => (c.type === "text" ? c.text : "")).join("\n")
+    if (r.isError === true) {
+      throw new TypeError(words === "" ? `${name} failed` : words)
+    }
+    return words
+  } catch (error) {
+    connected = null
+    throw error
+  }
+}
+
 /** The first connected Google account that granted `scope`; null when there's none or no core. */
 export const googleAccount = (scope: string) =>
   Effect.map(callCore("connections_list", {}), (r) => {
