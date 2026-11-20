@@ -8,11 +8,14 @@
   "type": "module",
   "scripts": {
     "start": "bun src/main.ts",
-    "typecheck": "tsgo --noEmit",
-    "lint": "oxlint --type-aware --fix --fix-suggestions",
+    "app": "electrobun prepare && vite build && electrobun dev",
+    "app:view": "vite",
+    "app:build": "sh scripts/app.sh",
+    "typecheck": "tsc --noEmit -p tsconfig.spur.json && tsc --noEmit -p tsconfig.view.json && tsc --noEmit -p tsconfig.bun.json",
+    "lint": "oxlint --type-aware --type-check --fix --fix-suggestions",
     "format": "oxfmt --write .",
     "fix": "bun run lint && bun run format",
-    "check": "bun run typecheck && bun run fix"
+    "check": "electrobun prepare >/dev/null && bun run typecheck && bun run fix"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.4.0",

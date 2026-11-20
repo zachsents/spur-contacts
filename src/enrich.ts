@@ -8,14 +8,7 @@ import { Log, Models } from "spur-kit"
 import { Effect } from "effect"
 
 import { parse, rec, recs, text as toText } from "./json.ts"
-import {
-  best,
-  Enriched,
-  nameOf,
-  PersonUpdated,
-  readPerson,
-  SenderIdentified,
-} from "./model.ts"
+import { best, Enriched, nameOf, PersonUpdated, readPerson, SenderIdentified } from "./model.ts"
 import type { Field, Finding, Person } from "./model.ts"
 import { commit, make, missing } from "./store.ts"
 import { phoneKey } from "./text.ts"

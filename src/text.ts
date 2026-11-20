@@ -126,7 +126,9 @@ export const SERVICES: Readonly<Record<string, string>> = {
 
 /** A field's label: its kind's, or for a handle its service's. */
 export const labelOf = (f: Fact) =>
-  f.kind === "handle" ? (SERVICES[f.service ?? ""] ?? f.service ?? "Handle") : (LABELS[f.kind] ?? f.kind)
+  f.kind === "handle"
+    ? (SERVICES[f.service ?? ""] ?? f.service ?? "Handle")
+    : (LABELS[f.kind] ?? f.kind)
 
 /** A day as people write it: Nov 20, 2026. */
 export const day = (ms: number) =>

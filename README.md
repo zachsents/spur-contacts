@@ -33,6 +33,20 @@ bun run check
 bun start   # serves MCP on stdio
 ```
 
+## Mac app
+
+`Contacts.app` (Electrobun) is the spur's own window: search as you type, a person's every field
+with its source and confidence, suggestions to keep or drop, the identified queue, lookups,
+merges and every change with its undo. It reads and changes people only through this spur's tools,
+via the core (`$SWITCH_CORE`, else the core in `~/.switch/config.json`), and follows the brain's
+contacts events to stay current. It dials in as the spur `contacts-app`, so the agent can open,
+search, pick and screenshot it.
+
+```sh
+bun run app         # dev
+bun run app:build   # signed with the Developer ID in ~/.switch/deploy.json, if there is one
+```
+
 ## iPhone
 
 `ios/` is Contacts for iPhone (SwiftUI, XcodeGen). It reaches this spur through Switch's core, calling the

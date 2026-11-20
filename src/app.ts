@@ -382,7 +382,12 @@ const identified = tool(
           .all()) {
           const e = SenderUnknown.decode(JSON.parse(r.payload))
           const p = readPerson(db, e.id)
-          if (p === null || seen.has(p.id) || best(p, "name") !== undefined || lookedUp(db, [p.id])) {
+          if (
+            p === null ||
+            seen.has(p.id) ||
+            best(p, "name") !== undefined ||
+            lookedUp(db, [p.id])
+          ) {
             continue
           }
           seen.add(p.id)
@@ -471,10 +476,17 @@ const history = tool(
         const list = inList(ids)
         const rows = db
           .query<
-            { type: string; payload: string; time: number; reason: string; undone: number },
+            {
+              type: string
+              payload: string
+              time: number
+              batch: string
+              reason: string
+              undone: number
+            },
             string[]
           >(
-            `SELECT e.type, e.payload, e.time, b.reason, b.undone FROM events e
+            `SELECT e.type, e.payload, e.time, b.batch, b.reason, b.undone FROM events e
              JOIN batches b ON b.batch = json_extract(e.payload, '$.batch')
              WHERE json_extract(e.payload, '$.id') IN (${list})
                OR json_extract(e.payload, '$.into') IN (${list})
@@ -485,10 +497,7 @@ const history = tool(
         const byBatch = new Map<string, Change>()
         for (const r of rows) {
           const raw: unknown = JSON.parse(r.payload)
-          const batch = typeof raw === "object" && raw !== null ? Reflect.get(raw, "batch") : ""
-          if (typeof batch !== "string") {
-            continue
-          }
+          const { batch } = r
           let c = byBatch.get(batch)
           if (c === undefined) {
             c = {
@@ -553,7 +562,9 @@ const confirm = tool(
         return yield* Effect.fail(new Error("Nothing to keep"))
       }
       const batch = batchId("confirm")
-      const kept = chosen.map((f) => make({ ...f, confidence: 1, suggested: false }, f.source, true))
+      const kept = chosen.map((f) =>
+        make({ ...f, confidence: 1, suggested: false }, f.source, true),
+      )
       yield* commit(
         batch,
         [PersonUpdated.make({ id: p.id, added: kept, removed: chosen, batch, reason: "kept" })],

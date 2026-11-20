@@ -43,7 +43,8 @@ mine.length > 0 ? String(mine[0].kCGWindowNumber) : ""`
 
 /** A JPEG of the window, even behind others (Screen Recording). */
 const windowShot = async () => {
-  const id = (await run(["osascript", "-l", "JavaScript", "-e", WINDOW_JXA])).trim()
+  const said = await run(["osascript", "-l", "JavaScript", "-e", WINDOW_JXA])
+  const id = said.trim()
   if (id === "") {
     throw new Error("No Contacts window")
   }
@@ -64,6 +65,8 @@ const windowApp = ({ win, send, shown }: Window) => {
       if (forward === true) {
         win.activate()
       }
+      // A frame for the window to draw it, so what's shown is after.
+      yield* Effect.sleep("150 millis")
       return yield* task(shown)
     })
   return defineApp({
@@ -109,7 +112,8 @@ const windowApp = ({ win, send, shown }: Window) => {
       tool(
         "shown",
         {
-          description: "What the window shows now: its page, the person open, the search, who's picked.",
+          description:
+            "What the window shows now: its page, the person open, the search, who's picked.",
           readOnly: true,
         },
         () => task(shown),
@@ -166,7 +170,9 @@ const socketTransport = (url: string) =>
 /** What the user saw, as UI events: in view, then backed out of or stayed on. */
 const draftOf = (s: Seen): Draft => {
   if (s.ms === undefined) {
-    return Viewed.make(s.item === undefined ? { surface: s.surface } : { surface: s.surface, item: s.item })
+    return Viewed.make(
+      s.item === undefined ? { surface: s.surface } : { surface: s.surface, item: s.item },
+    )
   }
   return left(s.surface, s.item, Date.now() - s.ms)
 }

@@ -9,7 +9,10 @@ export const CONTACTS = ["contacts"] as const
 
 export const peopleQuery = queryOptions({
   queryKey: [...CONTACTS, "people"],
-  queryFn: async () => (await call("people", {}, People)).people,
+  queryFn: async () => {
+    const answer = await call("people", {}, People)
+    return answer.people
+  },
 })
 
 /** One person, by id, phone, email or exact name. */
@@ -22,7 +25,10 @@ export const personQuery = (person: string) =>
 export const historyQuery = (person: string) =>
   queryOptions({
     queryKey: [...CONTACTS, "history", person],
-    queryFn: async () => (await call("history", { person, limit: 100 }, History)).changes,
+    queryFn: async () => {
+      const answer = await call("history", { person, limit: 100 }, History)
+      return answer.changes
+    },
   })
 
 export const identifiedQuery = queryOptions({
@@ -32,5 +38,8 @@ export const identifiedQuery = queryOptions({
 
 export const logQuery = queryOptions({
   queryKey: [...CONTACTS, "log"],
-  queryFn: async () => (await call("log", { limit: 200 }, Log)).batches,
+  queryFn: async () => {
+    const answer = await call("log", { limit: 200 }, Log)
+    return answer.batches
+  },
 })

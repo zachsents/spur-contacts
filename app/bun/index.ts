@@ -15,8 +15,9 @@ const settings = Schema.decodeUnknownOption(
 
 /** The core: $SWITCH_CORE, else the one this machine's host reports to, else this machine's. */
 const coreUrl = () => {
-  if (process.env.SWITCH_CORE) {
-    return process.env.SWITCH_CORE
+  const given = process.env.SWITCH_CORE
+  if (given !== undefined && given !== "") {
+    return given
   }
   const file = process.env.SWITCH_CONFIG ?? path.join(homedir(), ".switch", "config.json")
   const read = existsSync(file) ? settings(readFileSync(file, "utf-8")) : Option.none()
