@@ -1,7 +1,7 @@
 // Contacts as a spur: its tools, its events, and two widgets (a person card for chat, and the people
 // it recently identified, for Home).
 import type { Database } from "bun:sqlite"
-import { defineApp, HOME, Log, SWITCH_CATALOG, tool } from "spur-kit"
+import { defineApp, Log, SWITCH_CATALOG, tool } from "spur-kit"
 import type { LogService, ModelsService } from "spur-kit"
 import { Effect, Schema } from "effect"
 
@@ -760,7 +760,6 @@ export const contactsApp = defineApp<LogService | ModelsService>({
       title: "Identified",
       surfaces: ["space"],
       resource: "ui://contacts/identified",
-      space: HOME,
       size: {
         aspect: "auto",
         min: { cols: 3, rows: 1 },
