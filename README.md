@@ -1,6 +1,6 @@
-# spur-contacts
+# switch-ext-contacts
 
-People and companies in one set: the Apple and Google address books, other spurs' contacts and
+People and companies in one set: the Apple and Google address books, other extensions' contacts and
 everyone who messages the user, merged, with every field's source and confidence. Switch is the
 source of truth: each book is imported once (a card merges into someone only on a shared phone,
 email or handle and the same name), then gets what Switch holds. Every change is a batch that can be
@@ -36,12 +36,13 @@ the rest are deleted, each kept whole in the log so undo brings it back. Nothing
 before it's been imported, and nothing already there changes without a backup of both books from
 the last hour in `contacts-backup/<time>/` (`apple.vcf`, `apple.json`, `google.json`).
 
-A [Switch](https://switch.ax) spur, built on [spur-kit](https://github.com/zachsents/spur-kit).
+A [Switch](https://switch.ax) extension, built on
+[switch-ext-kit](https://github.com/zachsents/switch-ext-kit).
 
 ## Install
 
-Ask Switch's agent to install `github:zachsents/spur-contacts`, or add it in the desktop's Spurs
-view (⌘K, Spurs). It runs on a Mac (it reads Contacts through Contacts.app).
+Ask Switch's agent to install `github:zachsents/switch-ext-contacts`, or add it in the desktop's
+Extensions view (⌘K, Extensions). It runs on a Mac (it reads Contacts through Contacts.app).
 
 ## Setup
 
@@ -52,7 +53,7 @@ view (⌘K, Spurs). It runs on a Mac (it reads Contacts through Contacts.app).
   minutes (`CONTACTS_LOOPS=0` turns them off). Its log and state live in `$SWITCH_CONTACTS_DIR`, else `$SWITCH_DIR`, else
   `~/.switch`.
 
-Another spur adds people by emitting `<spur>.contact` events with `{ ref, name?, aliases?,
+Another extension adds people by emitting `<extension>.contact` events with `{ ref, name?, aliases?,
 emails?, phones?, handles?, company?, role?, note?, spaces? }`.
 
 ## Develop
@@ -65,10 +66,11 @@ bun start   # serves MCP on stdio
 
 ## Mac app
 
-`Contacts.app` (Electrobun) is the spur's own window: search as you type, a person's every field
-with its source and confidence, merges and every change with its undo. It reads and changes people only through this spur's tools,
+`Contacts.app` (Electrobun) is the extension's own window: search as you type, a person's every
+field with its source and confidence, merges and every change with its undo. It reads and changes
+people only through this extension's tools,
 via the core (`$SWITCH_CORE`, else the core in `~/.switch/config.json`), and follows the brain's
-contacts events to stay current. It dials in as the spur `contacts-app`, so the agent can open,
+contacts events to stay current. It dials in as the extension `contacts-app`, so the agent can open,
 search, pick and screenshot it.
 
 ```sh
@@ -78,7 +80,7 @@ bun run app:build   # signed with the Developer ID in ~/.switch/deploy.json, if 
 
 ## iPhone
 
-`ios/` is Contacts for iPhone (SwiftUI, XcodeGen). It reaches this spur through Switch's core, calling the
-same tools an agent does. `sh ios/build.sh` installs it on a paired iPhone; `--simulator` builds it
-for the simulator. Team, bundle id prefix and the core's address come from the environment or a
-`deploy.local` (`ios_team`, `ios_bundle_prefix`, `ios_core`), never the source.
+`ios/` is Contacts for iPhone (SwiftUI, XcodeGen). It reaches this extension through Switch's core,
+calling the same tools an agent does. `sh ios/build.sh` installs it on a paired iPhone;
+`--simulator` builds it for the simulator. Team, bundle id prefix and the core's address come from
+the environment or a `deploy.local` (`ios_team`, `ios_bundle_prefix`, `ios_core`), never the source.

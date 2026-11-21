@@ -37,7 +37,7 @@ struct Hit: Identifiable, Hashable {
   let name: String
   /// What's under the name: their phone, else email, else company.
   let detail: String
-  /// person, company or system; nil when unset (or from a spur that doesn't say).
+  /// person, company or system; nil when unset (or from an extension that doesn't say).
   let type: String?
   let labels: [String]
 
@@ -57,7 +57,7 @@ struct Hit: Identifiable, Hashable {
 final class Model {
   let core = Core(app: "contacts")
   var path: [Route] = []
-  /// Moves on every change the spur logs.
+  /// Moves on every change the extension logs.
   private(set) var changes = 0
   /// The last change made here, for its Undo.
   var done: Done?
@@ -88,7 +88,7 @@ final class Model {
     if url.host() == "history" { path = [.history] }
   }
 
-  /// Reads every label anyone's under; an older spur without `people` leaves them as they were.
+  /// Reads every label anyone's under; an older extension without `people` leaves them be.
   func loadLabels() async {
     guard let r = try? await core.call("people") else { return }
     let all = r["people"].array.flatMap { $0["labels"].array.map(\.str) }.filter { !$0.isEmpty }

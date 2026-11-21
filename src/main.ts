@@ -1,9 +1,9 @@
-// Contacts as a stdio MCP spur: `bun src/main.ts`. With a word, a one-off that needs no models:
+// Contacts as a stdio MCP server: `bun src/main.ts`. With a word, a one-off that needs no models:
 //   push [apple|google] [--dry]  send what changed (backs both books up first, the first time)
 //   backup                       both address books to <dir>/contacts-backup/<date>/
 //   undo <batch>
 // Importing decides with the host's models: the `import` tool.
-import { Models, serveStdio } from "spur-kit"
+import { Models, serveStdio } from "switch-ext-kit"
 import { Effect, Layer } from "effect"
 
 import { contactsApp } from "./app.ts"

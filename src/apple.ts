@@ -1,8 +1,8 @@
 // Apple Contacts, through Contacts.app's scripting (JXA): it works headless where the Contacts
 // framework needs a prompt a CLI can't show, and it reads and writes notes, which the framework
-// keeps from anything without Apple's entitlement. osascript runs as this spur's child, so the
-// access asked for is the host's that launched the spur (Switch Host), not a terminal's. It sees
-// every account Contacts holds (iCloud, On My Mac, Exchange, Google and others) as one list.
+// keeps from anything without Apple's entitlement. osascript runs as this extension's child, so the
+// access asked for is the host's that launched the extension (Switch Host), not a terminal's. It
+// sees every account Contacts holds (iCloud, On My Mac, Exchange, Google and others) as one list.
 import { Effect } from "effect"
 
 import { isJson, parse, rec, recs, strings, text } from "./json.ts"

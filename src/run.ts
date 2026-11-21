@@ -1,6 +1,6 @@
 // What runs beyond single tool calls: the whole import, and the loops that keep senders and other
 // sources coming in and changes going out.
-import { AppEvents, Log } from "spur-kit"
+import { AppEvents, Log } from "switch-ext-kit"
 import { Effect, Layer, Schedule, Stream } from "effect"
 
 import { importApple, importGoogle, importOffered, importSenders } from "./ingest.ts"
@@ -61,7 +61,7 @@ export const importAll = (again: boolean) =>
     return { apple, google, others, senders: senders.tally, unknown: senders.unknown.length }
   })
 
-/** The spur's own log, forwarded to whoever subscribed (Switch's brain), from where it left off. */
+/** The extension's own log, forwarded to whoever subscribed (Switch's brain), from where it left off. */
 const forward = Effect.gen(function* forwarding() {
   const log = yield* Log
   const events = yield* AppEvents

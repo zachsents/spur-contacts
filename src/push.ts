@@ -7,8 +7,8 @@
 // last hour.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { Log } from "spur-kit"
-import type { Draft } from "spur-kit"
+import { Log } from "switch-ext-kit"
+import type { Draft } from "switch-ext-kit"
 import { Effect } from "effect"
 
 import {

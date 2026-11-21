@@ -1,4 +1,4 @@
-// What the contacts spur's tools answer, as the view reads them.
+// What the contacts extension's tools answer, as the view reads them.
 import { Schema } from "effect"
 
 const fact = Schema.Struct({

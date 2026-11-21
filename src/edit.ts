@@ -1,7 +1,7 @@
 // Editing by hand and by the agent: single fields set or cleared whole, labels on and off, a person
 // linked to a card in a book, and every field made normal once (the migration).
-import { Log } from "spur-kit"
-import type { Draft } from "spur-kit"
+import { Log } from "switch-ext-kit"
+import type { Draft } from "switch-ext-kit"
 import { Effect } from "effect"
 
 import { splitName } from "./names.ts"

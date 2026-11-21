@@ -2,7 +2,7 @@
 // split into given and family when that's all there is. Applied to each change before it's written.
 import { isSupportedCountry } from "libphonenumber-js"
 import type { CountryCode } from "libphonenumber-js"
-import type { Draft } from "spur-kit"
+import type { Draft } from "switch-ext-kit"
 
 import { cleanName, cleanText, isInitial, normalName, splitName, splitTag } from "./names.ts"
 import { PersonCreated, PersonMerged, PersonSplit, PersonUpdated, ranked, TYPES } from "./model.ts"

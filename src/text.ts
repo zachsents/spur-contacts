@@ -1,5 +1,5 @@
-// What the spur and its app both need, with nothing to run: matching a query to a person, and a
-// field written the way people read it. No Bun, no log, so the app's view can import it.
+// What the extension and its app both need, with nothing to run: matching a query to a person, and
+// a field written the way people read it. No Bun, no log, so the app's view can import it.
 import { parsePhoneNumberFromString } from "libphonenumber-js"
 import type { CountryCode } from "libphonenumber-js"
 

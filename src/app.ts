@@ -1,7 +1,7 @@
-// Contacts as a spur: its tools, its events, and a person card for chat.
+// Contacts as an extension: its tools, its events, and a person card for chat.
 import type { Database } from "bun:sqlite"
-import { defineApp, Log, SWITCH_CATALOG, tool } from "spur-kit"
-import type { LogService, ModelsService } from "spur-kit"
+import { defineApp, Log, SWITCH_CATALOG, tool } from "switch-ext-kit"
+import type { LogService, ModelsService } from "switch-ext-kit"
 import { Effect, Schema } from "effect"
 
 import { SCOPE } from "./google.ts"
@@ -278,7 +278,7 @@ const importTool = tool(
   "import",
   {
     description:
-      "Take every source in: Apple and Google the first time (`again`: once more, for cards made there since), merged only into someone who surely is the same (a shared phone, email or handle and the same name); other spurs' contacts; and everyone who messages the user. Returns counts per source.",
+      "Take every source in: Apple and Google the first time (`again`: once more, for cards made there since), merged only into someone who surely is the same (a shared phone, email or handle and the same name); other extensions' contacts; and everyone who messages the user. Returns counts per source.",
     input: Schema.Struct({ again: Schema.optionalKey(Schema.Boolean) }),
   },
   (input) => importAll(input.again === true),

@@ -1,5 +1,6 @@
-// The contacts spur's tools, called through the core the way Switch's clients call a spur's: a
-// POST to /widgets/contacts/<tool>. Every answer is checked against its schema before it's used.
+// The contacts extension's tools, called through the core the way Switch's clients call an
+// extension's: a POST to /widgets/contacts/<tool>. Every answer is checked against its schema
+// before it's used.
 import { Schema } from "effect"
 
 /** The core: ?core= from the bun process, else this machine's. */
@@ -15,7 +16,7 @@ const mcpResult = Schema.Struct({
 })
 const decodeResult = Schema.decodeUnknownSync(mcpResult)
 
-/** Calls one of the spur's tools: its answer, decoded by `schema`, or what went wrong, thrown. */
+/** Calls one of the extension's tools: its answer, decoded by `schema`, or what went wrong, thrown. */
 export const call = async <A>(
   tool: string,
   args: Readonly<Record<string, unknown>>,

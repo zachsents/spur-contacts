@@ -1,7 +1,7 @@
 // The undo log is the event log: every change carries its batch, and undoing a batch writes the
 // inverse of each of its events, newest first, then takes back what it sent to Apple or Google.
-import { Log } from "spur-kit"
-import type { Draft } from "spur-kit"
+import { Log } from "switch-ext-kit"
+import type { Draft } from "switch-ext-kit"
 import { Effect } from "effect"
 
 import {

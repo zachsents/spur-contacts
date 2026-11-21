@@ -1,8 +1,8 @@
 // One model of people and companies: a person is a set of fields, each with where it came from
-// and how sure that is. Kept as events in the spur's own log, with this projection over them.
+// and how sure that is. Kept as events in the extension's own log, with this projection over them.
 import type { Database } from "bun:sqlite"
-import { defineCommand, defineEvent, on } from "spur-kit"
-import type { Draft, Projection } from "spur-kit"
+import { defineCommand, defineEvent, on } from "switch-ext-kit"
+import type { Draft, Projection } from "switch-ext-kit"
 import { Schema } from "effect"
 
 import { cleanName, composeName } from "./names.ts"
@@ -39,7 +39,7 @@ export const KINDS = [
   "space",
   "url",
   "birthday",
-  /** Their record in an address book or CRM: `service` is apple, google or the source spur; `value` its id. */
+  /** Their record in an address book or CRM: `service` is apple, google or the source extension; `value` its id. */
   "ref",
   /** The last time they and the user traded a message, as epoch ms. */
   "last_contact",
@@ -81,7 +81,7 @@ export const field = Schema.Struct({
   value: Schema.String,
   label: Schema.optionalKey(Schema.String),
   service: Schema.optionalKey(Schema.String),
-  /** apple, google, a source spur, imessage, gmail, instagram, texts, email, fastpeoplesearch, web, user, agent; derived: worked out from their name. */
+  /** apple, google, a source extension, imessage, gmail, instagram, texts, email, fastpeoplesearch, web, user, agent; derived: worked out from their name. */
   source: Schema.String,
   /** Where it was found, when that's a page. */
   url: Schema.optionalKey(Schema.String),

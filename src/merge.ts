@@ -1,8 +1,8 @@
 // Taking a record in: find who it is by phone, email, handle or ref; certain matches fold in, unsure
 // ones go to the decision model (Jev); anyone new is created.
 import type { Database } from "bun:sqlite"
-import { Log, Models } from "spur-kit"
-import type { Draft } from "spur-kit"
+import { Log, Models } from "switch-ext-kit"
+import type { Draft } from "switch-ext-kit"
 import { Effect } from "effect"
 
 import {

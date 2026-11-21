@@ -1,6 +1,6 @@
-// The side list's lines: worked out from the spur's answers on every render (the compiler keeps
-// them while nothing changes), searched in the view with the spur's own scoring, so typing never
-// waits on the network.
+// The side list's lines: worked out from the extension's answers on every render (the compiler
+// keeps them while nothing changes), searched in the view with the extension's own scoring, so
+// typing never waits on the network.
 import { useQuery } from "@tanstack/react-query"
 
 import { score } from "../../src/text.ts"

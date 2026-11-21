@@ -1,5 +1,5 @@
-// The spur's answers as queries, all under ["contacts"], so a contacts event in the brain marks
-// every one of them stale at once.
+// The extension's answers as queries, all under ["contacts"], so a contacts event in the brain
+// marks every one of them stale at once.
 import { queryOptions } from "@tanstack/react-query"
 
 import { History, Log, People, Person } from "./answers.ts"

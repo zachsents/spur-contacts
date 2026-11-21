@@ -20,7 +20,7 @@ export const linkQuery = queryOptions({
   gcTime: Infinity,
 })
 
-/** The spur's event types: high-rate or not, the brain sends them to a client that watches. */
+/** The extension's event types: high-rate or not, the brain sends them to a client that watches. */
 const WATCHED = [
   "contacts.person_created",
   "contacts.person_updated",

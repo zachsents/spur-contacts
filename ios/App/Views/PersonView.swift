@@ -17,19 +17,19 @@ struct PersonView: View {
   private var name: String { Pretty.name(person["name"].str) }
   private var fields: [JSON] { person["fields"].array }
 
-  /// The best held value of a kind, as the spur ranks them.
+  /// The best held value of a kind, as the extension ranks them.
   private func best(_ kind: String) -> String {
     fields.filter { $0["kind"].str == kind && $0["suggested"].bool != true }.max { Pretty.rank($0) < Pretty.rank($1) }?["value"].str ?? ""
   }
 
-  /// person, company or system; nil when unset. From `type`, else (an older spur) the fields.
+  /// person, company or system; nil when unset. From `type`, else (an older extension) the fields.
   private var type: String? {
     if let t = person["type"].string { return t }
     let t = best("type")
     return t.isEmpty ? nil : t
   }
 
-  /// Their labels: `labels`, else (an older spur) their group fields.
+  /// Their labels: `labels`, else (an older extension) their group fields.
   private var labels: [String] {
     if case .array(let a) = person["labels"] { return a.map(\.str).filter { !$0.isEmpty } }
     var seen = Set<String>()

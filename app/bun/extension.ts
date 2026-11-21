@@ -1,12 +1,12 @@
-// The window as a spur, `contacts-app`: tools the agent drives it with, and what the user does in
-// it as UI events. It dials the core's /spurs and speaks MCP over that socket, again whenever it
-// drops. Everything the window changes goes through the contacts spur's own tools, so the agent
-// can do all of it without the window too.
+// The window as an extension, `contacts-app`: tools the agent drives it with, and what the user
+// does in it as UI events. It dials the core's /extensions and speaks MCP over that socket, again
+// whenever it drops. Everything the window changes goes through the contacts extension's own tools,
+// so the agent can do all of it without the window too.
 import type { JSONRPCMessage, Transport } from "@modelcontextprotocol/server"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { answer, AppEvents, defineApp, left, serve, tool, Viewed } from "spur-kit"
-import type { Draft } from "spur-kit"
+import { answer, AppEvents, defineApp, left, serve, tool, Viewed } from "switch-ext-kit"
+import type { Draft } from "switch-ext-kit"
 import { Effect, Queue, Schema } from "effect"
 import type { BrowserWindow } from "electrobun/main"
 
@@ -186,7 +186,7 @@ export const saw = (s: Seen) => {
 
 /** Keeps the window dialed in to the core at `core` (http://…). */
 export const dialCore = (window: Window, core: string) => {
-  const url = new URL("/spurs?name=contacts-app", core)
+  const url = new URL("/extensions?name=contacts-app", core)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
   const app = windowApp(window)
   const once = Effect.scoped(

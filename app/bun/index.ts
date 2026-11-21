@@ -1,4 +1,4 @@
-// The Contacts app: one window over the contacts spur, reached through the core like any client.
+// The Contacts app: one window over the contacts extension, reached through the core as a client.
 import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
@@ -7,7 +7,7 @@ import { Option, Schema } from "effect"
 
 import type { AppRPC, Command } from "../shared/commands.ts"
 import { menuBar } from "./menu.ts"
-import { dialCore, saw } from "./spur.ts"
+import { dialCore, saw } from "./extension.ts"
 
 const settings = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ core: Schema.optionalKey(Schema.String) })),

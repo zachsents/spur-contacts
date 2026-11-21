@@ -1,8 +1,8 @@
 // The contacts log: the brain's write path on its own file, with the contacts projection.
 import { homedir } from "node:os"
 import path from "node:path"
-import { Log } from "spur-kit"
-import type { Draft } from "spur-kit"
+import { Log } from "switch-ext-kit"
+import type { Draft } from "switch-ext-kit"
 import { Effect, Semaphore } from "effect"
 
 import { Change, logEvents, keyOf, people, PersonUpdated, readPerson, resolve } from "./model.ts"

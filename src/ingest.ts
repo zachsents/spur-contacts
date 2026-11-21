@@ -1,6 +1,6 @@
 // Taking sources in. Apple and Google once, as the first import: after that Switch is the source of
 // truth and only pushes out. Other sources' records and message senders keep flowing in.
-import { Log } from "spur-kit"
+import { Log } from "switch-ext-kit"
 import { Effect } from "effect"
 
 import { appleBook } from "./apple.ts"
@@ -123,7 +123,7 @@ export const importApple = Effect.gen(function* importing() {
 /** Every saved Google contact, the same way. */
 export const importGoogle = googleBook.pipe(Effect.flatMap((rs) => takeAll("google", rs, "exact")))
 
-/** What other spurs publish, one tally per source. */
+/** What other extensions publish, one tally per source. */
 export const importOffered = (matching: Matching = "model") =>
   offered.pipe(
     Effect.flatMap((by) =>

@@ -1,6 +1,6 @@
 import Foundation
 
-// A field written the way people read it, as the spur's src/text.ts does (LABELS, SERVICES,
+// A field written the way people read it, as the extension's src/text.ts does (LABELS, SERVICES,
 // SITES, pretty, profileUrl), so the iPhone shows what the desktop shows.
 
 enum Pretty {
@@ -117,7 +117,8 @@ enum Pretty {
     v.hasPrefix("+") && v.dropFirst().allSatisfy(\.isNumber) ? phone(v) : v
   }
 
-  /// A field's rank among its kind's, as the spur's `rank`: the user's first, then the surest, then the newest.
+  /// A field's rank among its kind's, as the extension's `rank`: the user's first, then the surest,
+  /// then the newest.
   static func rank(_ f: JSON) -> Double {
     (f["suggested"].bool == true ? -10 : 0) + (f["user"].bool == true ? 2 : 0) + (f["confidence"].number ?? 0)
       + (f["at"].number ?? 0) / 1e15

@@ -1,17 +1,17 @@
 {
-  "name": "spur-contacts",
+  "name": "switch-ext-contacts",
   "version": "0.1.0",
   "private": true,
-  "description": "People and companies from the user's address books, other spurs and everyone who messages them, as a Switch spur.",
+  "description": "People and companies from the user's address books, other extensions and everyone who messages them, as a Switch extension.",
   "license": "MIT",
-  "repository": "github:zachsents/spur-contacts",
+  "repository": "github:zachsents/switch-ext-contacts",
   "type": "module",
   "scripts": {
     "start": "bun src/main.ts",
     "app": "electrobun prepare && vite build && electrobun dev",
     "app:view": "vite",
     "app:build": "sh scripts/app.sh",
-    "typecheck": "tsc --noEmit -p tsconfig.spur.json && tsc --noEmit -p tsconfig.view.json && tsc --noEmit -p tsconfig.bun.json",
+    "typecheck": "tsc --noEmit -p tsconfig.extension.json && tsc --noEmit -p tsconfig.view.json && tsc --noEmit -p tsconfig.bun.json",
     "lint": "oxlint --type-aware --type-check --fix --fix-suggestions",
     "format": "oxfmt --write .",
     "fix": "bun run lint && bun run format",
@@ -23,7 +23,7 @@
     "@modelcontextprotocol/server": "^2.4.0",
     "effect": "^4.1.5",
     "libphonenumber-js": "^1.13.17",
-    "spur-kit": "github:zachsents/spur-kit#b6096f7"
+    "switch-ext-kit": "github:zachsents/switch-ext-kit#8a500e4"
   },
   "devDependencies": {
     "@babel/core": "^8.1.2",
@@ -54,7 +54,7 @@
     "ultracite": "^8.3.1",
     "vite": "^8.3.8"
   },
-  "spur": {
+  "extension": {
     "name": "contacts",
     "main": "src/main.ts",
     "needs": [

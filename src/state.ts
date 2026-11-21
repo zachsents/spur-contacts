@@ -1,4 +1,4 @@
-// What the spur remembers between runs, beside its log: cursors into Switch's brain and
+// What the extension remembers between runs, beside its log: cursors into Switch's brain and
 // Switchboard, how far its log has gone out, and when each address book was first taken in
 // (nothing goes out to a book before that).
 import { readFileSync, writeFileSync } from "node:fs"

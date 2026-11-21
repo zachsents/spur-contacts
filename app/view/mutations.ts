@@ -1,5 +1,5 @@
-// Every change is one of the spur's tools, the same ones the agent calls. Each marks the contacts
-// queries stale when it lands; the brain's events do the same for changes made elsewhere.
+// Every change is one of the extension's tools, the same ones the agent calls. Each marks the
+// contacts queries stale when it lands; the brain's events do the same for changes made elsewhere.
 import { mutationOptions } from "@tanstack/react-query"
 
 import { Done } from "./answers.ts"

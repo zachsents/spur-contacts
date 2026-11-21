@@ -27,7 +27,7 @@ export const bestOf = (person: Person, kind: string) =>
     .toSorted((a, b) => rank(b) - rank(a))
     .at(0)?.value ?? ""
 
-/** Their labels, as the spur answers them or, from an older one, their group fields. */
+/** Their labels, as the extension answers them or, from an older one, their group fields. */
 export const labelsOf = (person: Person) =>
   person.labels ?? [
     ...new Set(
@@ -54,7 +54,7 @@ export const familySet = (v: string | null): Partial<Record<Settable, string | n
   return one === undefined ? { family: v } : { initial: one }
 }
 
-/** What they are: as the spur answers it or, from an older one, their type field. */
+/** What they are: as the extension answers it or, from an older one, their type field. */
 export const typeOf = (person: Person) =>
   person.type === undefined
     ? (TYPES.find((t) => t === bestOf(person, "type")) ?? null)

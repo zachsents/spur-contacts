@@ -1,6 +1,7 @@
-// Other sources, such as a business's CRM: any spur publishes the people it knows as
-// `<spur>.contact` events in Switch's brain, and they come in here like an address book's cards,
-// each under its spur's name. A spur publishes a record again whenever it changes.
+// Other sources, such as a business's CRM: any extension publishes the people it knows as
+// `<extension>.contact` events in Switch's brain, and they come in here like an address book's
+// cards, each under its extension's name. An extension publishes a record again whenever it
+// changes.
 import { Database } from "bun:sqlite"
 import { existsSync } from "node:fs"
 import { Effect, Schema } from "effect"
@@ -12,7 +13,7 @@ import type { Stated } from "./store.ts"
 const strings = Schema.optionalKey(Schema.Array(Schema.String))
 const one = Schema.optionalKey(Schema.String)
 
-/** The payload of a `<spur>.contact` event. */
+/** The payload of an `<extension>.contact` event. */
 export const Offered = Schema.Struct({
   /** Its id in that source. */
   ref: Schema.String,
