@@ -52,7 +52,7 @@ import {
 import type { Field, Kind, Person, Target } from "./model.ts"
 import { normalValue } from "./normal.ts"
 import { load } from "./state.ts"
-import { commit, DIR, make } from "./store.ts"
+import { books, commit, DIR, make } from "./store.ts"
 import { phoneKey, profileUrl } from "./text.ts"
 
 export const BACKUPS = path.join(DIR, "contacts-backup")
@@ -439,12 +439,15 @@ export const plan = (
   return { person: p, remote: remoteId, writes, conflicts }
 }
 
-/** The person's records in one book, oldest link first. */
-const refsOf = (p: Person, target: Target) =>
-  p.fields
-    .filter((f) => f.kind === "ref" && f.service === target)
-    .toSorted((a, b) => a.at - b.at)
-    .map((f) => f.value)
+/** The person's records in one book, oldest link first, each once (a card linked twice is one card). */
+const refsOf = (p: Person, target: Target) => [
+  ...new Set(
+    p.fields
+      .filter((f) => f.kind === "ref" && f.service === target)
+      .toSorted((a, b) => a.at - b.at)
+      .map((f) => f.value),
+  ),
+]
 
 /**
  * Who gets a new card: a person or company (not a system), named, with a number or an email, who
@@ -1014,147 +1017,149 @@ const pushRelated = (
 
 /** Sends what changed to one book. `only`: just these people. `dry`: says what it would send. */
 export const push = (target: Target, batch: string, only?: ReadonlySet<string>, dry = false) =>
-  Effect.gen(function* pushing() {
-    if (load().imported[target] === undefined) {
-      return {
-        target,
-        people: 0,
-        created: 0,
-        values: 0,
-        deleted: 0,
-        conflicts: 0,
-        errors: [`${target} not imported yet`],
-      } satisfies PushReport
-    }
-    const { all, pushedBy, conflictBy, known } = yield* history(target)
-    const taken = new Set(
-      all
-        .filter((p) => refsOf(p, target).length > 0)
-        .flatMap((p) =>
-          p.fields
-            .filter((f) => f.kind === "phone" || f.kind === "email")
-            .map((f) => listKey(f.kind === "phone" ? "phone" : "email", f.value)),
-        ),
-    )
-    const people = all.filter(
-      (p) =>
-        (only === undefined || only.has(p.id)) &&
-        (refsOf(p, target).length > 0 || shouldCreate(p, taken)),
-    )
-    const { remotes, googles } = yield* remotesOf(
-      target,
-      people.flatMap((p) => refsOf(p, target)),
-    )
-    const adopted =
-      target === "google" && !dry
-        ? yield* adopt(
-            people.filter((p) => refsOf(p, target).length === 0),
-            all,
-            googles,
-            remotes,
-            batch,
-          )
-        : new Map<string, string>()
-    const after = adopted.size > 0 ? yield* history(target) : null
-
-    const extras: { person: string; remote: string }[] = []
-    const plans = people.flatMap((p) => {
-      const refs = refsOf(p, target)
-      const live = refs.filter((id) => remotes.has(id))
-      const adoptedId = adopted.get(p.id)
-      if (refs.length > 0 && live.length === 0) {
-        return []
-      }
-      const [id = adoptedId ?? null, ...rest] = live
-      for (const x of rest) {
-        extras.push({ person: p.id, remote: x })
-      }
-      const own =
-        (after ?? { pushedBy }).pushedBy.get(p.id)?.get(id ?? "") ?? new Map<string, string>()
-      const pl = plan(
-        target,
-        p,
-        id,
-        id === null ? null : (remotes.get(id) ?? null),
-        known.get(p.id) ?? emptyKnown(),
-        own,
-        conflictBy.get(p.id) ?? new Set<string>(),
-      )
-      return pl.writes.length > 0 || pl.conflicts.length > 0 ? [pl] : []
-    })
-    const conflictEvents: Draft[] = plans.flatMap((pl) =>
-      pl.conflicts.map((c) =>
-        Conflicted.make({
-          id: pl.person.id,
+  books.withPermit(
+    Effect.gen(function* pushing() {
+      if (load().imported[target] === undefined) {
+        return {
           target,
-          remote: pl.remote ?? "",
-          key: c.key,
-          ours: c.ours,
-          theirs: c.theirs,
-        }),
-      ),
-    )
-    const writing = plans.filter((pl) => pl.writes.length > 0)
-    const relating =
-      target === "apple" ? (yield* pushRelated(all, pushedBy, batch, true)).values : 0
-    if (dry) {
-      let planned = relating
-      for (const pl of writing) {
-        planned += pl.writes.length
+          people: 0,
+          created: 0,
+          values: 0,
+          deleted: 0,
+          conflicts: 0,
+          errors: [`${target} not imported yet`],
+        } satisfies PushReport
+      }
+      const { all, pushedBy, conflictBy, known } = yield* history(target)
+      const taken = new Set(
+        all
+          .filter((p) => refsOf(p, target).length > 0)
+          .flatMap((p) =>
+            p.fields
+              .filter((f) => f.kind === "phone" || f.kind === "email")
+              .map((f) => listKey(f.kind === "phone" ? "phone" : "email", f.value)),
+          ),
+      )
+      const people = all.filter(
+        (p) =>
+          (only === undefined || only.has(p.id)) &&
+          (refsOf(p, target).length > 0 || shouldCreate(p, taken)),
+      )
+      const { remotes, googles } = yield* remotesOf(
+        target,
+        people.flatMap((p) => refsOf(p, target)),
+      )
+      const adopted =
+        target === "google" && !dry
+          ? yield* adopt(
+              people.filter((p) => refsOf(p, target).length === 0),
+              all,
+              googles,
+              remotes,
+              batch,
+            )
+          : new Map<string, string>()
+      const after = adopted.size > 0 ? yield* history(target) : null
+
+      const extras: { person: string; remote: string }[] = []
+      const plans = people.flatMap((p) => {
+        const refs = refsOf(p, target)
+        const live = refs.filter((id) => remotes.has(id))
+        const adoptedId = adopted.get(p.id)
+        if (refs.length > 0 && live.length === 0) {
+          return []
+        }
+        const [id = adoptedId ?? null, ...rest] = live
+        for (const x of rest) {
+          extras.push({ person: p.id, remote: x })
+        }
+        const own =
+          (after ?? { pushedBy }).pushedBy.get(p.id)?.get(id ?? "") ?? new Map<string, string>()
+        const pl = plan(
+          target,
+          p,
+          id,
+          id === null ? null : (remotes.get(id) ?? null),
+          known.get(p.id) ?? emptyKnown(),
+          own,
+          conflictBy.get(p.id) ?? new Set<string>(),
+        )
+        return pl.writes.length > 0 || pl.conflicts.length > 0 ? [pl] : []
+      })
+      const conflictEvents: Draft[] = plans.flatMap((pl) =>
+        pl.conflicts.map((c) =>
+          Conflicted.make({
+            id: pl.person.id,
+            target,
+            remote: pl.remote ?? "",
+            key: c.key,
+            ours: c.ours,
+            theirs: c.theirs,
+          }),
+        ),
+      )
+      const writing = plans.filter((pl) => pl.writes.length > 0)
+      const relating =
+        target === "apple" ? (yield* pushRelated(all, pushedBy, batch, true)).values : 0
+      if (dry) {
+        let planned = relating
+        for (const pl of writing) {
+          planned += pl.writes.length
+        }
+        return {
+          target,
+          people: writing.length,
+          created: writing.filter((pl) => pl.remote === null).length,
+          values: planned,
+          deleted: extras.length,
+          conflicts: conflictEvents.length,
+          errors: [],
+          planned: plans.map((pl) => ({
+            person: pl.person.id,
+            name: nameOf(pl.person),
+            record: pl.remote,
+            writes: pl.writes,
+            conflicts: pl.conflicts,
+          })),
+          deleting: extras.map((x) => ({ person: x.person, record: x.remote })),
+        } satisfies PushReport
+      }
+      const touches = writing.some((pl) => pl.remote !== null) || extras.length > 0 || relating > 0
+      const saved = touches ? yield* backedUp(target) : undefined
+      yield* commit(batch, conflictEvents)
+      const { done, errors } =
+        target === "apple"
+          ? yield* writeApple(writing, batch)
+          : yield* writeGoogle(writing, googles, batch)
+      const doneIds = new Set(done.map((pl) => pl.person.id))
+      const extrasNow = extras.filter(
+        (x) => doneIds.has(x.person) || !writing.some((pl) => pl.person.id === x.person),
+      )
+      const gone = yield* deleteExtras(target, extrasNow, googles, batch)
+      const related =
+        relating > 0
+          ? yield* pushRelated(all, pushedBy, batch, false)
+          : { values: 0, errors: [] as string[] }
+      let created = 0
+      let { values } = related
+      for (const pl of done) {
+        values += pl.writes.length
+        if (pl.remote === null) {
+          created += 1
+        }
       }
       return {
         target,
         people: writing.length,
-        created: writing.filter((pl) => pl.remote === null).length,
-        values: planned,
-        deleted: extras.length,
+        created,
+        values,
+        deleted: gone.deleted,
         conflicts: conflictEvents.length,
-        errors: [],
-        planned: plans.map((pl) => ({
-          person: pl.person.id,
-          name: nameOf(pl.person),
-          record: pl.remote,
-          writes: pl.writes,
-          conflicts: pl.conflicts,
-        })),
-        deleting: extras.map((x) => ({ person: x.person, record: x.remote })),
+        ...(saved === undefined ? {} : { backup: saved }),
+        errors: [...errors, ...gone.errors, ...related.errors],
       } satisfies PushReport
-    }
-    const touches = writing.some((pl) => pl.remote !== null) || extras.length > 0 || relating > 0
-    const saved = touches ? yield* backedUp(target) : undefined
-    yield* commit(batch, conflictEvents)
-    const { done, errors } =
-      target === "apple"
-        ? yield* writeApple(writing, batch)
-        : yield* writeGoogle(writing, googles, batch)
-    const doneIds = new Set(done.map((pl) => pl.person.id))
-    const extrasNow = extras.filter(
-      (x) => doneIds.has(x.person) || !writing.some((pl) => pl.person.id === x.person),
-    )
-    const gone = yield* deleteExtras(target, extrasNow, googles, batch)
-    const related =
-      relating > 0
-        ? yield* pushRelated(all, pushedBy, batch, false)
-        : { values: 0, errors: [] as string[] }
-    let created = 0
-    let { values } = related
-    for (const pl of done) {
-      values += pl.writes.length
-      if (pl.remote === null) {
-        created += 1
-      }
-    }
-    return {
-      target,
-      people: writing.length,
-      created,
-      values,
-      deleted: gone.deleted,
-      conflicts: conflictEvents.length,
-      ...(saved === undefined ? {} : { backup: saved }),
-      errors: [...errors, ...gone.errors, ...related.errors],
-    } satisfies PushReport
-  })
+    }),
+  )
 
 interface Written {
   readonly id: string

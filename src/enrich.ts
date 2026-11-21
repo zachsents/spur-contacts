@@ -9,6 +9,7 @@ import { parse, rec, recs, text as toText } from "./json.ts"
 import { best, Enriched, nameOf, PersonUpdated, readPerson, SenderIdentified } from "./model.ts"
 import type { Field, Finding, Person } from "./model.ts"
 import { coreText } from "./core.ts"
+import { splitName } from "./names.ts"
 import { commit, make, missing } from "./store.ts"
 import { phoneKey } from "./text.ts"
 
@@ -194,6 +195,80 @@ const known = (p: Person) =>
     .map((f) => `${f.kind}${f.service === undefined ? "" : `/${f.service}`}: ${f.value}`)
     .join("; ")
 
+/**
+ * The family name in a found full name, when its first name agrees with the one known: "Drew"
+ * and a listing for "Drew A Smith" give Smith. Nothing when the first names differ.
+ */
+const familyOf = (found: string, given: string | undefined) => {
+  const split = splitName(found)
+  if (given === undefined || split?.family === undefined) {
+    return null
+  }
+  const first = (split.given ?? "").split(" ")[0]?.toLowerCase() ?? ""
+  const ours = given.split(" ")[0]?.toLowerCase() ?? ""
+  return first !== "" && (first.startsWith(ours) || ours.startsWith(first)) ? split.family : null
+}
+
+/** A person (not a company or system) with no family name yet: worth a records lookup. */
+const missingFamily = (p: Person) => {
+  const type = best(p, "type")
+  return (
+    type !== "company" &&
+    type !== "system" &&
+    !p.fields.some((f) => f.kind === "family" && f.suggested !== true)
+  )
+}
+
+/** A number's listed owner, judged against what's known of them: the name, and family if it fits. */
+const judged = (p: Person, owner: Owner, phone: string, said: string | undefined) =>
+  Effect.gen(function* judging() {
+    const given = best(p, "given")
+    const context = [
+      said ?? "",
+      ...(given === undefined ? [] : [`The user knows them as ${nameOf(p)}`]),
+      ...p.fields
+        .filter((f) => f.kind === "handle" || f.kind === "space")
+        .map((f) => `${f.kind}: ${f.value}`),
+    ]
+      .filter((x) => x !== "")
+      .join("\n")
+    const read = yield* ownerConfidence(owner, context).pipe(
+      Effect.orElseSucceed(() => ({ p: 0.5, cost: 0 })),
+    )
+    // A current-owner listing alone is fairly strong; Jev's read moves it.
+    const confidence = Math.round((0.55 + 0.4 * read.p) * 100) / 100
+    const name = titleCase(owner.name)
+    const written = confidence >= WRITE
+    const family = familyOf(name, given)
+    const findings: Finding[] = [
+      {
+        kind: "name",
+        value: name,
+        source: "fastpeoplesearch",
+        url: owner.url,
+        confidence,
+        written,
+      },
+      ...(family === null
+        ? []
+        : [
+            {
+              kind: "family" as const,
+              value: family,
+              source: "fastpeoplesearch",
+              url: owner.url,
+              confidence,
+              written,
+            },
+          ]),
+    ]
+    return {
+      findings,
+      cost: read.cost,
+      identified: { name, url: owner.url, confidence, handle: phone },
+    }
+  })
+
 /** The error as thrown, so its message survives. */
 const asError = (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
 
@@ -273,8 +348,7 @@ export const enrich = (
     let failed = false
 
     const phone = best(p, "phone")
-    const hasName = p.fields.some((f) => f.kind === "name" && f.suggested !== true)
-    if (phone !== undefined && !hasName) {
+    if (phone !== undefined && missingFamily(p)) {
       looked.push("phone")
       const owner = yield* Effect.tryPromise({
         try: async () => await phoneOwner(phone),
@@ -289,30 +363,10 @@ export const enrich = (
       if (owner === "unsupported") {
         note = "Not a US number"
       } else if (owner !== null) {
-        const context = [
-          options.context ?? "",
-          ...p.fields
-            .filter((f) => f.kind === "handle" || f.kind === "space")
-            .map((f) => `${f.kind}: ${f.value}`),
-        ]
-          .filter((x) => x !== "")
-          .join("\n")
-        const judged = yield* ownerConfidence(owner, context).pipe(
-          Effect.orElseSucceed(() => ({ p: 0.5, cost: 0 })),
-        )
-        cost += judged.cost
-        // A current-owner listing alone is fairly strong; Jev's read moves it.
-        const confidence = Math.round((0.55 + 0.4 * judged.p) * 100) / 100
-        const name = titleCase(owner.name)
-        findings.push({
-          kind: "name",
-          value: name,
-          source: "fastpeoplesearch",
-          url: owner.url,
-          confidence,
-          written: confidence >= WRITE,
-        })
-        identified = { name, url: owner.url, confidence, handle: phone }
+        const found = yield* judged(p, owner, phone, options.context)
+        cost += found.cost
+        findings.push(...found.findings)
+        ;({ identified } = found)
       }
     }
 
@@ -331,6 +385,7 @@ export const enrich = (
       ).pipe(
         Effect.catch((error) => {
           note = error instanceof Error ? error.message : String(error)
+          failed = true
           return Effect.succeed(nothing())
         }),
       )
@@ -347,7 +402,9 @@ export const enrich = (
       ...(added.length > 0
         ? [PersonUpdated.make({ id: p.id, added, removed: [], batch, reason: "enriched" })]
         : []),
-      ...(failed && findings.length === 0
+      // A lookup refused (the hour's page budget, a human check) or that looked at nothing isn't one:
+      // the person stays unlooked, and is tried again later.
+      ...((failed && findings.length === 0) || looked.length === 0
         ? []
         : [
             Enriched.make({

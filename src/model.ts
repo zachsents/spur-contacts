@@ -352,8 +352,9 @@ const noteBatch = (db: Database, batch: string, reason: string, at: number) => {
 export const people: Projection = {
   name: "contacts",
   // 2: what went out is kept per record (`remote`), so merging two people pushed to the same
-  // book no longer collides. 3: names match without case or decoration.
-  version: 3,
+  // book no longer collides. 3: names match without case or decoration. 4: what's written for
+  // someone merged away lands on who they were merged into.
+  version: 4,
   tables: ["people", "fields", "pushed", "conflicts", "batches"],
   create: `
     CREATE TABLE people (id TEXT PRIMARY KEY, created INTEGER NOT NULL, updated INTEGER NOT NULL,
@@ -383,13 +384,15 @@ export const people: Projection = {
       noteBatch(db, p.batch, p.reason, e.time)
     }),
     on(PersonUpdated, (db, p, e) => {
+      // Written for someone since merged away: it lands on who they were merged into.
+      const id = resolve(db, p.id) ?? p.id
       for (const f of p.removed) {
         db.query("DELETE FROM fields WHERE id = ?").run(f.id)
       }
       for (const f of p.added) {
-        putField(db, p.id, f)
+        putField(db, id, f)
       }
-      touch(db, p.id, e.time)
+      touch(db, id, e.time)
       noteBatch(db, p.batch, p.reason, e.time)
     }),
     on(PersonMerged, (db, p, e) => {
@@ -415,7 +418,8 @@ export const people: Projection = {
       db.query("UPDATE people SET retired = ? WHERE id = ?").run(p.retired ? 1 : 0, p.id)
       noteBatch(db, p.batch, p.reason, e.time)
     }),
-    on(Pushed, (db, p, e) => {
+    on(Pushed, (db, raw, e) => {
+      const p = { ...raw, id: resolve(db, raw.id) ?? raw.id }
       for (const w of p.written) {
         if (p.reverted) {
           db.query(
@@ -430,7 +434,8 @@ export const people: Projection = {
       }
       noteBatch(db, p.batch, p.reason, e.time)
     }),
-    on(Conflicted, (db, p, e) => {
+    on(Conflicted, (db, raw, e) => {
+      const p = { ...raw, id: resolve(db, raw.id) ?? raw.id }
       db.query(
         `INSERT INTO conflicts (person, target, key, ours, theirs, at) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (person, target, key) DO UPDATE SET ours = excluded.ours, theirs = excluded.theirs, at = excluded.at`,

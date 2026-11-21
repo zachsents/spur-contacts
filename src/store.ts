@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { Log } from "spur-kit"
 import type { Draft } from "spur-kit"
-import { Effect } from "effect"
+import { Effect, Semaphore } from "effect"
 
 import {
   Change,
@@ -24,6 +24,12 @@ export const DB = path.join(DIR, "contacts.db")
 
 export const logLayer = (file = DB) =>
   Log.layer({ path: file, events: contactEvents, projections: [people], commands: [Change] })
+
+/**
+ * One at a time: a push, a merge, a link. A merge landing mid-push could otherwise leave a card the
+ * push just made linked to the person merged away, and the next push would make it again.
+ */
+export const books = Semaphore.makeUnsafe(1)
 
 export const batchId = (what: string) =>
   `${what}-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`

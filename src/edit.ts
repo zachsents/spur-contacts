@@ -5,10 +5,10 @@ import type { Draft } from "spur-kit"
 import { Effect } from "effect"
 
 import { splitName } from "./names.ts"
-import { everyone, holders, normOf, PersonUpdated, readPerson } from "./model.ts"
-import type { Field, Kind, PersonType, Target } from "./model.ts"
+import { everyone, holders, normOf, PersonUpdated, ranked, readPerson } from "./model.ts"
+import type { Field, Kind, Person, PersonType, Target } from "./model.ts"
 import { normalField, partsChange, tagsOf } from "./normal.ts"
-import { batchId, commit, make } from "./store.ts"
+import { batchId, books, commit, make } from "./store.ts"
 
 /** Single fields `set` takes; null clears one. */
 export const SETTABLE = [
@@ -54,6 +54,22 @@ const withParts = (s: Settings): Settings => {
   }
 }
 
+/**
+ * Family (or initial) cleared and nothing set in its place: the name becomes what's left, so the
+ * old surname isn't worked out of it again ("Mark Landlord" with family cleared is Mark).
+ */
+const withoutLast = (s: Settings, p: Person): Settings => {
+  const cleared =
+    (s.family === null || s.initial === null) &&
+    !(typeof s.family === "string" && s.family.trim() !== "") &&
+    !(typeof s.initial === "string" && s.initial.trim() !== "")
+  const given = s.given ?? ranked(p, "given").find((f) => f.suggested !== true)?.value
+  if (!cleared || s.name !== undefined || given === undefined || given === null || given === "") {
+    return s
+  }
+  return { ...s, name: given, family: null, initial: null }
+}
+
 /** Sets or clears single fields and labels, as the user's own. */
 export const setFields = (
   person: string,
@@ -66,7 +82,7 @@ export const setFields = (
     if (p === null) {
       return yield* Effect.fail(new Error(`No person ${person}`))
     }
-    const all = withParts(settings)
+    const all = withoutLast(withParts(settings), p)
     const kinds = new Set<Kind>()
     const added: Field[] = []
     for (const key of SETTABLE) {
@@ -105,39 +121,41 @@ export const setFields = (
 
 /** Links a person to a card in a book, or takes the link off. */
 export const linkCard = (person: string, target: Target, record: string, unlink: boolean) =>
-  Effect.gen(function* linking() {
-    const log = yield* Log
-    const { p, others } = yield* log.read((db) => ({
-      p: readPerson(db, person),
-      others: holders(db, "ref", normOf("ref", record, target)),
-    }))
-    if (p === null) {
-      return yield* Effect.fail(new Error(`No person ${person}`))
-    }
-    const batch = batchId(unlink ? "unlink" : "link")
-    if (unlink) {
-      const removed = p.fields.filter(
-        (f) => f.kind === "ref" && f.service === target && f.value === record,
-      )
-      yield* commit(
-        batch,
-        [PersonUpdated.make({ id: p.id, added: [], removed, batch, reason: "unlink" })],
-        true,
-      )
+  books.withPermit(
+    Effect.gen(function* linking() {
+      const log = yield* Log
+      const { p, others } = yield* log.read((db) => ({
+        p: readPerson(db, person),
+        others: holders(db, "ref", normOf("ref", record, target)),
+      }))
+      if (p === null) {
+        return yield* Effect.fail(new Error(`No person ${person}`))
+      }
+      const batch = batchId(unlink ? "unlink" : "link")
+      if (unlink) {
+        const removed = p.fields.filter(
+          (f) => f.kind === "ref" && f.service === target && f.value === record,
+        )
+        yield* commit(
+          batch,
+          [PersonUpdated.make({ id: p.id, added: [], removed, batch, reason: "unlink" })],
+          true,
+        )
+        return { id: p.id, batch }
+      }
+      const elsewhere = others.filter((id) => id !== p.id)
+      if (elsewhere.length > 0) {
+        return yield* Effect.fail(
+          new Error(`${record} is already linked to ${elsewhere.join(", ")}: merge them instead`),
+        )
+      }
+      const ref = make({ kind: "ref", value: record, service: target }, "user", false)
+      yield* commit(batch, [
+        PersonUpdated.make({ id: p.id, added: [ref], removed: [], batch, reason: "link" }),
+      ])
       return { id: p.id, batch }
-    }
-    const elsewhere = others.filter((id) => id !== p.id)
-    if (elsewhere.length > 0) {
-      return yield* Effect.fail(
-        new Error(`${record} is already linked to ${elsewhere.join(", ")}: merge them instead`),
-      )
-    }
-    const ref = make({ kind: "ref", value: record, service: target }, "user", false)
-    yield* commit(batch, [
-      PersonUpdated.make({ id: p.id, added: [ref], removed: [], batch, reason: "link" }),
-    ])
-    return { id: p.id, batch }
-  })
+    }),
+  )
 
 /** Every field made normal and every name split, once: one batch, so one undo takes it back. */
 export const normalizeAll = Effect.gen(function* normalizing() {

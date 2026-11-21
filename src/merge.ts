@@ -17,7 +17,7 @@ import {
   readPerson,
 } from "./model.ts"
 import type { Field, Person } from "./model.ts"
-import { commit, make, makeAll, missing } from "./store.ts"
+import { books, commit, make, makeAll, missing } from "./store.ts"
 import type { Stated } from "./store.ts"
 
 /** One record from a source: an address book card, a CRM contact, a sender. */
@@ -346,22 +346,24 @@ export const take = (record: SourceRecord, batch: string, reason: string, matchi
 
 /** Merges people by hand: `from` folds into `into`. */
 export const mergeByHand = (into: string, from: readonly string[], batch: string, reason: string) =>
-  Effect.gen(function* merging() {
-    const log = yield* Log
-    const { head, rest } = yield* log.read((db) => ({
-      head: readPerson(db, into),
-      rest: from.flatMap((id) => {
-        const p = readPerson(db, id)
-        return p ? [p] : []
-      }),
-    }))
-    if (head === null) {
-      return yield* Effect.fail(new Error(`No person ${into}`))
-    }
-    const others = rest.filter((p) => p.id !== head.id)
-    yield* commit(
-      batch,
-      others.map((p) => mergeEvent(head, p, batch, reason, 1)),
-    )
-    return { into: head.id, merged: others.map((p) => ({ id: p.id, name: nameOf(p) })) }
-  })
+  books.withPermit(
+    Effect.gen(function* merging() {
+      const log = yield* Log
+      const { head, rest } = yield* log.read((db) => ({
+        head: readPerson(db, into),
+        rest: from.flatMap((id) => {
+          const p = readPerson(db, id)
+          return p ? [p] : []
+        }),
+      }))
+      if (head === null) {
+        return yield* Effect.fail(new Error(`No person ${into}`))
+      }
+      const others = rest.filter((p) => p.id !== head.id)
+      yield* commit(
+        batch,
+        others.map((p) => mergeEvent(head, p, batch, reason, 1)),
+      )
+      return { into: head.id, merged: others.map((p) => ({ id: p.id, name: nameOf(p) })) }
+    }),
+  )
