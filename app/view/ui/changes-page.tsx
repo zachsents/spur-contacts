@@ -1,4 +1,4 @@
-// Every batch of changes, newest first, each with its undo: imports, lookups, merges, edits, what
+// Every batch of changes, newest first, each with its undo: imports, merges, edits, what
 // went out to Apple and Google, and undos themselves.
 import { useSuspenseQuery } from "@tanstack/react-query"
 

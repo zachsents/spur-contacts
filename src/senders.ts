@@ -118,7 +118,6 @@ export interface Sender {
   marketing: number
   /** The user wrote to them, or it's a two-way thread: someone real. */
   create: boolean
-  firstText: string
 }
 
 const isPhoneName = (v: string) => /^[+\d\s().-]+$/u.test(v)
@@ -146,9 +145,6 @@ const fromIMessage = (r: Seen, get: Get) => {
     const said = str(b.text)
     if (MARKETING.test(said)) {
       s.marketing += 1
-    }
-    if (s.firstText === "") {
-      s.firstText = said.slice(0, 200)
     }
     const from = str(b.from)
     if (from !== "" && from !== handle && !isPhoneName(from)) {
@@ -248,7 +244,6 @@ export const gather = (seen: readonly Seen[]) => {
         fromUser: 0,
         marketing: 0,
         create: false,
-        firstText: "",
       }
       by.set(key, s)
     }

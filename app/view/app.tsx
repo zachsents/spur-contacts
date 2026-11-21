@@ -1,22 +1,16 @@
 // The window: the band, the list with its search, and the page beside it (a person, people picked
 // to merge, or every change). Commands come from the menu bar, the agent and the keys alike.
 import { useForm, useSelector } from "@tanstack/react-form"
-import { useIsMutating, useMutation, useMutationState, useQuery } from "@tanstack/react-query"
+import { useIsMutating, useMutation } from "@tanstack/react-query"
 import { Suspense, useRef, useState } from "react"
 
 import type { Command } from "../shared/commands.ts"
 import { useBridge } from "./bridge.ts"
 import { KIND_FILTERS, NO_SEARCH, searchForm } from "./forms.ts"
 import { useListing } from "./listing.ts"
-import {
-  confirmMutation,
-  enrichMutation,
-  identifyMutation,
-  importMutation,
-  undoMutation,
-} from "./mutations.ts"
+import { importMutation, undoMutation } from "./mutations.ts"
 import { queryClient } from "./query.ts"
-import { CONTACTS, identifiedQuery, logQuery, personQuery } from "./queries.ts"
+import { CONTACTS, logQuery, personQuery } from "./queries.ts"
 import { currentRoute, openChanges, openPeople, openPerson, useRoute } from "./route.ts"
 import { Band } from "./ui/band.tsx"
 import { Boundary } from "./ui/boundary.tsx"
@@ -25,11 +19,8 @@ import { FilterSelect } from "./ui/filter-select.tsx"
 import { Runner, Stop } from "./ui/marks.tsx"
 import { MergePage } from "./ui/merge-page.tsx"
 import { NewPerson } from "./ui/new-person.tsx"
-import { Key } from "./ui/parts.tsx"
 import { PersonPage } from "./ui/person-page.tsx"
 import { Side } from "./ui/side.tsx"
-
-const ENRICH = [...CONTACTS, "enrich"]
 
 /** The person open, as far as the cache knows them when the agent asks. */
 const shownOf = (open: string) => {
@@ -54,38 +45,12 @@ export const App = () => {
   const search = useRef<HTMLInputElement>(null)
   const [picked, setPicked] = useState<readonly string[]>([])
   const [making, setMaking] = useState(false)
-  const identify = useMutation(identifyMutation)
   const importing = useMutation(importMutation)
   const undo = useMutation(undoMutation)
-  const keep = useMutation(confirmMutation)
-  const { data: queue = [] } = useQuery({ ...identifiedQuery, select: (d) => d.queue })
-  const lookUpAll = (
-    <span className="ml-3">
-      {identify.isPending ? (
-        <Runner />
-      ) : (
-        <Key
-          onClick={() => {
-            identify.mutate()
-          }}
-        >
-          Look Up
-        </Key>
-      )}
-    </span>
-  )
-  const { lines, labels, order, error } = useListing(searched, lookUpAll)
+  const { lines, labels, order, error } = useListing(searched)
   const open = route.page === "people" ? (route.person ?? order[0] ?? null) : null
-  const lookup = useMutation(enrichMutation(open ?? ""))
-  const enriching = useMutationState({
-    filters: { mutationKey: ENRICH, status: "pending" },
-    select: (m) => {
-      const who = m.options.mutationKey?.[2]
-      return typeof who === "string" ? who : ""
-    },
-  })
   const busy = useIsMutating({ mutationKey: [...CONTACTS, "import"] }) > 0
-  const failed = importing.error ?? identify.error ?? undo.error ?? keep.error
+  const failed = importing.error ?? undo.error
 
   const step = (by: number) => {
     const at = open === null ? -1 : order.indexOf(open)
@@ -127,17 +92,6 @@ export const App = () => {
     },
     previous: () => {
       step(-1)
-    },
-    lookup: () => {
-      if (open !== null) {
-        lookup.mutate()
-      }
-    },
-    keep: () => {
-      const q = queue.find((x) => x.id === open)
-      if (q) {
-        keep.mutate({ person: q.id, fields: q.fields })
-      }
     },
     merge: () => {
       if (open !== null) {
@@ -285,7 +239,6 @@ export const App = () => {
           lines={lines}
           open={open}
           picked={picked}
-          enriching={enriching}
           error={error}
           onOpen={openPerson}
           onPick={pick}

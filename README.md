@@ -3,9 +3,8 @@
 People and companies in one set: the Apple and Google address books, other spurs' contacts and
 everyone who messages the user, merged, with every field's source and confidence. Switch is the
 source of truth: each book is imported once (a card merges into someone only on a shared phone,
-email or handle and the same name), then gets what Switch holds. Unknown senders are looked up in
-public records. Every change is a batch that can be undone, including what went out to Apple or
-Google. Its widgets: a person card for chat, and newly identified numbers in Home.
+email or handle and the same name), then gets what Switch holds. Every change is a batch that can be
+undone, including what went out to Apple or Google. Its widget: a person card for chat.
 
 ## Fields
 
@@ -48,11 +47,9 @@ view (⌘K, Spurs). It runs on a Mac (it reads Contacts through Contacts.app).
 
 - Connect a Google account with contacts access when Switch asks.
 - Allow the host to control Contacts the first time it reads them.
-- Looking up unknown numbers loads pages in the user's browser through the browser spur
-  (`github:zachsents/spur-browser#a4e1fda` or later).
 - Apple is imported as soon as Contacts answers, Google as soon as it's connected (or run the
-  `import` tool). Its loops keep senders and other sources coming in, look up unknown numbers a few
-  a day, and push changes out every two minutes (`CONTACTS_LOOPS=0` turns them off). Its log and state live in `$SWITCH_CONTACTS_DIR`, else `$SWITCH_DIR`, else
+  `import` tool). Its loops keep senders and other sources coming in and push changes out every two
+  minutes (`CONTACTS_LOOPS=0` turns them off). Its log and state live in `$SWITCH_CONTACTS_DIR`, else `$SWITCH_DIR`, else
   `~/.switch`.
 
 Another spur adds people by emitting `<spur>.contact` events with `{ ref, name?, aliases?,
@@ -69,8 +66,7 @@ bun start   # serves MCP on stdio
 ## Mac app
 
 `Contacts.app` (Electrobun) is the spur's own window: search as you type, a person's every field
-with its source and confidence, suggestions to keep or drop, the identified queue, lookups,
-merges and every change with its undo. It reads and changes people only through this spur's tools,
+with its source and confidence, merges and every change with its undo. It reads and changes people only through this spur's tools,
 via the core (`$SWITCH_CORE`, else the core in `~/.switch/config.json`), and follows the brain's
 contacts events to stay current. It dials in as the spur `contacts-app`, so the agent can open,
 search, pick and screenshot it.

@@ -2,14 +2,13 @@ import SwiftUI
 
 /// One person (`get`): their name and single fields in a grid they're edited in (`set`), their
 /// labels, how to reach them, then every field with where it came from and how sure that is. Its
-/// menu looks them up (`enrich`) and merges someone else into them (`merge`); the last change's
+/// menu merges someone else into them (`merge`); the last change's
 /// Undo stays at the bottom until the next one.
 struct PersonView: View {
   let model: Model
   let id: String
   @State private var person: JSON = .null
   @State private var problem: String?
-  @State private var lookingUp = false
   @State private var merging = false
   @State private var naming = false
   @State private var newLabel = ""
@@ -55,8 +54,6 @@ struct PersonView: View {
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Menu {
-          Button("Look up", systemImage: "magnifyingglass") { Task { await lookUp() } }
-            .disabled(lookingUp)
           Button("Merge…", systemImage: "arrow.triangle.merge") { merging = true }
         } label: {
           Image(systemName: "ellipsis")
@@ -75,7 +72,6 @@ struct PersonView: View {
 
   @ViewBuilder private var content: some View {
     let held = fields.filter { $0["suggested"].bool != true && $0["kind"].str != "ref" }
-    let suggested = fields.filter { $0["suggested"].bool == true }
     let family = best("family")
     let initial = best("initial")
     let showsInitial = family.isEmpty && !initial.isEmpty
@@ -129,12 +125,6 @@ struct PersonView: View {
     BoardSection(label: "Sources", count: held.count) {
       Rule()
       ForEach(held, id: \.self) { SourceRow(field: $0) }
-    }
-    if !suggested.isEmpty {
-      BoardSection(mark: AnyView(Hand(size: 13)), label: "Suggested", count: suggested.count) {
-        Rule()
-        ForEach(suggested, id: \.self) { SourceRow(field: $0) }
-      }
     }
   }
 
@@ -231,20 +221,6 @@ struct PersonView: View {
   private func load() async {
     do {
       person = try await model.core.call("get", ["person": .string(id)])
-      problem = nil
-    } catch {
-      problem = error.localizedDescription
-    }
-  }
-
-  private func lookUp() async {
-    lookingUp = true
-    defer { lookingUp = false }
-    do {
-      let r = try await model.core.call("enrich", ["person": .string(id)])
-      let found = r["findings"].array.count
-      let batch = try await model.core.call("log", ["limit": 1])["batches"].array.first?["batch"].str ?? ""
-      model.done = Model.Done(text: found == 0 ? "Nothing found" : "Found \(found)", batch: batch.hasPrefix("enrich") ? batch : "")
       problem = nil
     } catch {
       problem = error.localizedDescription

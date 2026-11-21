@@ -76,8 +76,6 @@ const MENU: ApplicationMenuItemConfig[] = [
       item("Next", { kind: "next" }, "CommandOrControl+Down"),
       item("Previous", { kind: "previous" }, "CommandOrControl+Up"),
       divider,
-      item("Look Up", { kind: "lookup" }, "CommandOrControl+L"),
-      item("Keep Identification", { kind: "keep" }, "CommandOrControl+K"),
       item("Merge Picked", { kind: "merge" }, "CommandOrControl+Shift+M"),
     ],
   },

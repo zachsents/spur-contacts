@@ -1,5 +1,5 @@
 // The brain's sync socket, for what changes elsewhere: when a contacts event lands (the agent's
-// lookup, an import, an undo from chat), every contacts query goes stale and what's on screen asks
+// edit, an import, an undo from chat), every contacts query goes stale and what's on screen asks
 // again. The link's state is query data, written only here.
 import { queryOptions } from "@tanstack/react-query"
 import { Option, Schema } from "effect"
@@ -27,8 +27,6 @@ const WATCHED = [
   "contacts.person_merged",
   "contacts.person_split",
   "contacts.person_retired",
-  "contacts.enriched",
-  "contacts.sender_identified",
   "contacts.sender_unknown",
   "contacts.pushed",
   "contacts.conflicted",

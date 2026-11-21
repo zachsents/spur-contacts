@@ -1,11 +1,10 @@
-// The list beside the person: the search as its top cell, its filters under it, then the identified queue, the numbers
-// still unknown and everyone, or with a search only who matches, best first. Drawn only where
-// it's in view (TanStack Virtual).
+// The list beside the person: the search as its top cell, its filters under it, then everyone, or
+// with a search only who matches, best first. Drawn only where it's in view (TanStack Virtual).
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useState } from "react"
 import type { ReactNode } from "react"
 
-import { Hand, Runner, Stop } from "./marks.tsx"
+import { Stop } from "./marks.tsx"
 import { Data } from "./parts.tsx"
 import type { Line } from "../listing.ts"
 
@@ -18,7 +17,6 @@ export const Side = ({
   lines,
   open,
   picked,
-  enriching,
   error,
   onOpen,
   onPick,
@@ -28,7 +26,6 @@ export const Side = ({
   lines: readonly Line[]
   open: string | null
   picked: readonly string[]
-  enriching: readonly string[]
   error: string | null
   onOpen: (id: string) => void
   onPick: (id: string) => void
@@ -66,14 +63,12 @@ export const Side = ({
                   style={place}
                   className={`absolute top-0 left-0 m-0 flex w-full items-center gap-2 px-inset text-small font-semibold tracking-[0.06em] text-ink uppercase ${row.index > 0 ? "heavy-t" : ""}`}
                 >
-                  {line.mark === "hand" && <Hand />}
                   <span>{line.label}</span>
                   {line.count > 0 && (
                     <span className="ml-auto font-mono text-data font-normal tracking-normal text-ink3">
                       {line.count}
                     </span>
                   )}
-                  {line.action}
                 </h2>
               )
             }
@@ -106,7 +101,6 @@ export const Side = ({
               >
                 {isPicked && <span className="absolute inset-y-0 left-0 w-[3px] bg-ink" />}
                 <span className="min-w-0 flex-1 truncate">{line.name}</span>
-                {enriching.includes(line.id) && <Runner />}
                 {line.detail !== undefined && <Data>{line.detail}</Data>}
               </button>
             )

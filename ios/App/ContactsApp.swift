@@ -31,7 +31,7 @@ enum Route: Hashable {
   case history
 }
 
-/// One person as `search` and `identified` list them.
+/// One person as `search` lists them.
 struct Hit: Identifiable, Hashable {
   let id: String
   let name: String
@@ -73,7 +73,7 @@ final class Model {
     core.on(
       [
         "contacts.person_created", "contacts.person_updated", "contacts.person_merged", "contacts.person_split",
-        "contacts.person_retired", "contacts.enriched", "contacts.sender_identified", "contacts.undone",
+        "contacts.person_retired", "contacts.undone",
       ]
     ) { [weak self] _, _ in self?.changes += 1 }
     core.start()

@@ -14,8 +14,6 @@ export const Command = Schema.Union([
       "forward",
       "next",
       "previous",
-      "lookup",
-      "keep",
       "merge",
       "undo",
       "import",

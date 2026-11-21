@@ -5,15 +5,7 @@ import { Log } from "spur-kit"
 import type { Draft } from "spur-kit"
 import { Effect, Semaphore } from "effect"
 
-import {
-  Change,
-  contactEvents,
-  keyOf,
-  people,
-  PersonUpdated,
-  readPerson,
-  resolve,
-} from "./model.ts"
+import { Change, logEvents, keyOf, people, PersonUpdated, readPerson, resolve } from "./model.ts"
 import type { Field, Kind, Person } from "./model.ts"
 import { afterEvents, normalEvents, normalField, partsChange, tagsOf } from "./normal.ts"
 
@@ -23,7 +15,7 @@ export const DIR = process.env.SWITCH_CONTACTS_DIR ?? SWITCH
 export const DB = path.join(DIR, "contacts.db")
 
 export const logLayer = (file = DB) =>
-  Log.layer({ path: file, events: contactEvents, projections: [people], commands: [Change] })
+  Log.layer({ path: file, events: logEvents, projections: [people], commands: [Change] })
 
 /**
  * One at a time: a push, a merge, a link. A merge landing mid-push could otherwise leave a card the

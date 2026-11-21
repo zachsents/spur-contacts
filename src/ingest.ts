@@ -137,7 +137,7 @@ export const unknownSender = (s: Sender) =>
 
 /**
  * Senders since the cursors: folded in, and each phone no address book names recorded as an
- * unknown sender, once. Returns the unknown ones, for enrichment.
+ * unknown sender, once. Returns the unknown ones.
  */
 export const importSenders = (cursor: { readonly brain: number; readonly since: number }) =>
   Effect.gen(function* sensing() {

@@ -27,7 +27,7 @@ export const Band = ({
   page: "people" | "changes"
   onPeople: () => void
   onChanges: () => void
-  /** What's running or went wrong across the window: an import, a lookup of unknown numbers. */
+  /** What's running or went wrong across the window: an import, an undo. */
   live: ReactNode
 }) => {
   const { data: link } = useQuery(linkQuery)

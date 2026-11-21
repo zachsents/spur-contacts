@@ -1,12 +1,10 @@
 import SwiftUI
 
-/// The root: a search over everyone (`search`), narrowed by a label and a type, and, before anything's
-/// typed or picked, the people the spur recently identified from unsaved numbers (`identified`).
+/// The root: a search over everyone (`search`), narrowed by a label and a type.
 struct SearchView: View {
   let model: Model
   @State private var query = ""
   @State private var hits: [Hit] = []
-  @State private var identified: [Hit] = []
   @State private var problem: String?
   @State private var label: String?
   /// person, company, system, or none for unset.
@@ -23,17 +21,12 @@ struct SearchView: View {
       if let problem { Problem(text: problem) }
       ScrollView {
         LazyVStack(spacing: 0) {
-          if !asking {
-            if !identified.isEmpty {
-              BoardSection(label: "Identified", count: identified.count, first: true) {
-                Rule()
-                ForEach(identified) { HitRow(hit: $0, model: model) }
-              }
+          if asking {
+            if hits.isEmpty {
+              Empty("No one")
+            } else {
+              ForEach(hits) { HitRow(hit: $0, model: model) }
             }
-          } else if hits.isEmpty {
-            Empty("No one")
-          } else {
-            ForEach(hits) { HitRow(hit: $0, model: model) }
           }
         }
       }
@@ -52,7 +45,6 @@ struct SearchView: View {
       }
     }
     .task(id: "\(query)|\(label ?? "")|\(type ?? "")|\(model.changes)") { await search() }
-    .task(id: model.changes) { await loadIdentified() }
     .task { await model.loadLabels() }
     .seen(model.core, "search")
   }
@@ -78,14 +70,6 @@ struct SearchView: View {
     }
   }
 
-  private func loadIdentified() async {
-    do {
-      identified = try await model.core.call("identified")["people"].array.map(Hit.init)
-      problem = nil
-    } catch {
-      problem = error.localizedDescription
-    }
-  }
 }
 
 /// The search's two narrowings, side by side: a type and a label.

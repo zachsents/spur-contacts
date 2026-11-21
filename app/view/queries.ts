@@ -2,7 +2,7 @@
 // every one of them stale at once.
 import { queryOptions } from "@tanstack/react-query"
 
-import { History, Identified, Log, People, Person } from "./answers.ts"
+import { History, Log, People, Person } from "./answers.ts"
 import { call } from "./core.ts"
 
 export const CONTACTS = ["contacts"] as const
@@ -30,11 +30,6 @@ export const historyQuery = (person: string) =>
       return answer.changes
     },
   })
-
-export const identifiedQuery = queryOptions({
-  queryKey: [...CONTACTS, "identified"],
-  queryFn: async () => await call("identified", {}, Identified),
-})
 
 export const logQuery = queryOptions({
   queryKey: [...CONTACTS, "log"],

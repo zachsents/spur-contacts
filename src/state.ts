@@ -1,6 +1,6 @@
 // What the spur remembers between runs, beside its log: cursors into Switch's brain and
-// Switchboard, how far its log has gone out, today's lookups, and when each address book was
-// first taken in (nothing goes out to a book before that).
+// Switchboard, how far its log has gone out, and when each address book was first taken in
+// (nothing goes out to a book before that).
 import { readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
@@ -13,7 +13,6 @@ export interface State {
   brain: number
   since: number
   forwarded: number
-  lookups: number[]
   pushedThrough: number
   /** When each book was imported, as epoch ms. */
   imported: { apple?: number; google?: number }
@@ -32,19 +31,15 @@ const importedOf = (v: unknown): State["imported"] => {
 export const load = (): State => {
   try {
     const s = rec(parse(readFileSync(STATE, "utf-8")))
-    const lookups = Array.isArray(s.lookups)
-      ? s.lookups.filter((t: unknown) => typeof t === "number")
-      : []
     return {
       brain: num(s.brain),
       since: num(s.since),
       forwarded: num(s.forwarded),
-      lookups,
       pushedThrough: num(s.pushedThrough),
       imported: importedOf(s.imported),
     }
   } catch {
-    return { brain: 0, since: 0, forwarded: 0, lookups: [], pushedThrough: 0, imported: {} }
+    return { brain: 0, since: 0, forwarded: 0, pushedThrough: 0, imported: {} }
   }
 }
 /** Saves the state; when each book was imported only ever gains, whoever saved last. */

@@ -136,6 +136,8 @@ export const PersonRetired = defineEvent(
   Schema.Struct({ id: Schema.String, retired: Schema.Boolean, ...why }),
 )
 
+// Lookups once ran here; their events stay so the log written then still reads.
+
 const finding = Schema.Struct({
   kind: Schema.Literals(KINDS),
   value: Schema.String,
@@ -146,8 +148,6 @@ const finding = Schema.Struct({
   /** Written to the person; else a suggestion. */
   written: Schema.Boolean,
 })
-export type Finding = typeof finding.Type
-
 export const Enriched = defineEvent(
   "contacts.enriched",
   1,
@@ -250,14 +250,15 @@ export const contactEvents = [
   PersonMerged,
   PersonSplit,
   PersonRetired,
-  Enriched,
-  SenderIdentified,
   SenderUnknown,
   Pushed,
   Conflicted,
   Imported,
   Undone,
 ]
+
+/** Everything the log holds, including what's no longer written. */
+export const logEvents = [...contactEvents, Enriched, SenderIdentified]
 
 // Normal forms, for matching.
 
@@ -587,7 +588,7 @@ export const holders = (db: Database, kind: Kind, norm: string): string[] =>
     .all(kind, norm)
     .map((r) => r.person)
 
-// The one command: a change worked out elsewhere (imports, merges, enrichment, undo), checked here
+// The one command: a change worked out elsewhere (imports, merges, edits, undo), checked here
 // against what the log holds before it's written.
 
 const change = Schema.Struct({

@@ -2,7 +2,7 @@
 //   push [apple|google] [--dry]  send what changed (backs both books up first, the first time)
 //   backup                       both address books to <dir>/contacts-backup/<date>/
 //   undo <batch>
-// Importing and lookups decide with the host's models: the `import` and `identify` tools.
+// Importing decides with the host's models: the `import` tool.
 import { Models, serveStdio } from "spur-kit"
 import { Effect, Layer } from "effect"
 

@@ -25,9 +25,6 @@ const did = (c: Change) => {
   if (c.sent.length > 0) {
     parts.push(`→ ${c.sent.map(sourceName).join(", ")}`)
   }
-  if (c.found > 0) {
-    parts.push(`${c.found} found`)
-  }
   return parts.join(" ")
 }
 

@@ -1,5 +1,4 @@
-// Contacts as a spur: its tools, its events, and two widgets (a person card for chat, and the people
-// it recently identified, for Home).
+// Contacts as a spur: its tools, its events, and a person card for chat.
 import type { Database } from "bun:sqlite"
 import { defineApp, Log, SWITCH_CATALOG, tool } from "spur-kit"
 import type { LogService, ModelsService } from "spur-kit"
@@ -8,12 +7,10 @@ import { Effect, Schema } from "effect"
 import { SCOPE } from "./google.ts"
 
 import { linkCard, normalizeAll, setFields } from "./edit.ts"
-import { enrich } from "./enrich.ts"
 import { mergeByHand } from "./merge.ts"
 import {
   best,
   contactEvents,
-  Enriched,
   everyone,
   KINDS,
   nameOf,
@@ -25,15 +22,13 @@ import {
   Pushed,
   ranked,
   readPerson,
-  SenderIdentified,
-  SenderUnknown,
   SINGLE,
   TYPES,
 } from "./model.ts"
 import type { Field, Person } from "./model.ts"
-import { batchId, commit, make, makeAll, missing } from "./store.ts"
+import { batchId, commit, makeAll, missing } from "./store.ts"
 import { backup, linksOf, push } from "./push.ts"
-import { identify, importAll } from "./run.ts"
+import { importAll } from "./run.ts"
 import { labelOf, pretty, score } from "./text.ts"
 import { undo } from "./undo.ts"
 
@@ -52,30 +47,7 @@ const family = (db: Database, id: string) => {
 
 const inList = (ids: readonly string[]) => ids.map(() => "?").join(", ")
 
-/** The last lookup of them: when, what it looked at, what it found and wrote, its cost. */
-const lookedUp = (db: Database, ids: readonly string[]) => {
-  const row = db
-    .query<{ payload: string; time: number }, string[]>(
-      `SELECT payload, time FROM events WHERE type = '${Enriched.type}'
-       AND json_extract(payload, '$.id') IN (${inList(ids)})
-       AND json_extract(payload, '$.batch') NOT IN (SELECT batch FROM batches WHERE undone = 1)
-       ORDER BY seq DESC LIMIT 1`,
-    )
-    .get(...ids)
-  if (row === null) {
-    return null
-  }
-  const e = Enriched.decode(JSON.parse(row.payload))
-  return {
-    at: row.time,
-    looked: e.looked,
-    found: e.findings.length,
-    written: e.findings.filter((f) => f.written).length,
-    cost: e.cost,
-  }
-}
-
-/** A person as tools answer it: the best of each kind, every field with its source, and suggestions. */
+/** A person as tools answer it: the best of each kind, and every field with its source. */
 const view = (db: Database, p: Person) => {
   const facts: { label: string; value: string }[] = []
   for (const kind of KINDS) {
@@ -128,7 +100,6 @@ const view = (db: Database, p: Person) => {
       ...(f.suggested === true ? { suggested: true } : {}),
       at: f.at,
     })),
-    lookup: lookedUp(db, ids),
     conflicts,
   }
 }
@@ -293,16 +264,6 @@ const merge = tool(
     }),
 )
 
-const enrichTool = tool(
-  "enrich",
-  {
-    description:
-      "Look a person up: an unsaved number in public records (FastPeopleSearch), and the web for email, company, role, LinkedIn and socials. Sure findings are written; unsure ones become suggestions. Takes 10 to 40 seconds.",
-    input: Schema.Struct({ person: Schema.String, web: Schema.optionalKey(Schema.Boolean) }),
-  },
-  (input) => enrich(input.person, batchId("enrich"), { web: input.web ?? true }),
-)
-
 const undoTool = tool(
   "undo",
   {
@@ -321,16 +282,6 @@ const importTool = tool(
     input: Schema.Struct({ again: Schema.optionalKey(Schema.Boolean) }),
   },
   (input) => importAll(input.again === true),
-)
-
-const identifyTool = tool(
-  "identify",
-  {
-    description:
-      "Look up unknown senders' numbers in public records, newest first, within the day's budget. `count`: how many (default 5).",
-    input: Schema.Struct({ count: Schema.optionalKey(Schema.Number) }),
-  },
-  (input) => identify(input.count ?? 5),
 )
 
 const logTool = tool(
@@ -352,92 +303,6 @@ const logTool = tool(
           .all(Math.min(200, input.limit ?? 20)),
       )
       return { batches: batches.map((b) => ({ ...b, undone: b.undone === 1 })) }
-    }),
-)
-
-/** Their name came from a lookup the user hasn't made theirs yet. */
-const unsure = (p: Person) => !p.fields.some((f) => f.kind === "name" && f.user)
-
-const identified = tool(
-  "identified",
-  {
-    description:
-      "People recently identified from an unsaved number, newest first: `queue` holds those the user hasn't kept (`confirm`) or undone, `waiting` unknown numbers not looked up yet.",
-    readOnly: true,
-  },
-  () =>
-    Effect.gen(function* listing() {
-      const log = yield* Log
-      return yield* log.read((db) => {
-        const undone = new Set(
-          db
-            .query<{ batch: string }, []>("SELECT batch FROM batches WHERE undone = 1")
-            .all()
-            .map((b) => b.batch),
-        )
-        const seen = new Set<string>()
-        const people = []
-        const queue = []
-        for (const r of db
-          .query<{ payload: string; time: number }, []>(
-            `SELECT payload, time FROM events WHERE type = '${SenderIdentified.type}' ORDER BY seq DESC LIMIT 200`,
-          )
-          .all()) {
-          const e = SenderIdentified.decode(JSON.parse(r.payload))
-          const p = undone.has(e.batch) ? null : readPerson(db, e.id)
-          if (p === null || seen.has(p.id)) {
-            continue
-          }
-          seen.add(p.id)
-          const phone = pretty({ kind: "phone", value: e.handle })
-          people.push({ id: p.id, name: nameOf(p), phone })
-          if (unsure(p)) {
-            queue.push({
-              id: p.id,
-              name: nameOf(p),
-              phone,
-              source: e.source,
-              url: e.url,
-              confidence: e.confidence,
-              batch: e.batch,
-              at: r.time,
-              fields: p.fields
-                .filter((f) => f.kind === "name" && !f.user && f.source === e.source)
-                .map((f) => f.id),
-            })
-          }
-        }
-        const waiting = []
-        for (const r of db
-          .query<{ payload: string; time: number }, []>(
-            `SELECT payload, time FROM events WHERE type = '${SenderUnknown.type}' ORDER BY seq DESC LIMIT 200`,
-          )
-          .all()) {
-          const e = SenderUnknown.decode(JSON.parse(r.payload))
-          const p = readPerson(db, e.id)
-          if (
-            p === null ||
-            seen.has(p.id) ||
-            best(p, "name") !== undefined ||
-            lookedUp(db, [p.id])
-          ) {
-            continue
-          }
-          seen.add(p.id)
-          waiting.push({
-            id: p.id,
-            phone: pretty({ kind: "phone", value: e.handle }),
-            channel: e.channel,
-            at: r.time,
-          })
-        }
-        return {
-          people: people.slice(0, 12),
-          empty: people.length === 0 ? "Nobody" : "",
-          queue,
-          waiting,
-        }
-      })
     }),
 )
 
@@ -488,14 +353,13 @@ interface Change {
   merged: string[]
   split: string[]
   sent: string[]
-  found: number
 }
 
 const history = tool(
   "history",
   {
     description:
-      "What happened to one person, newest first, a batch at a time: fields added and removed, merges and splits, lookups, what went out to Apple or Google. Each batch can be undone.",
+      "What happened to one person, newest first, a batch at a time: fields added and removed, merges and splits, what went out to Apple or Google. Each batch can be undone.",
     readOnly: true,
     input: Schema.Struct({ person: Schema.String, limit: Schema.optionalKey(Schema.Finite) }),
   },
@@ -546,7 +410,6 @@ const history = tool(
               merged: [],
               split: [],
               sent: [],
-              found: 0,
             }
             byBatch.set(batch, c)
           }
@@ -568,44 +431,10 @@ const history = tool(
             if (!c.sent.includes(e.target)) {
               c.sent.push(e.target)
             }
-          } else if (r.type === Enriched.type) {
-            c.found += Enriched.decode(raw).findings.length
           }
         }
         return { changes: [...byBatch.values()].slice(0, Math.min(200, input.limit ?? 50)) }
       })
-    }),
-)
-
-const confirm = tool(
-  "confirm",
-  {
-    description:
-      "Make fields the user's, as sure: an identified name or a suggestion they keep. Theirs are never overwritten, and suggestions start going out to Apple and Google. `fields`: ids from `get`.",
-    input: Schema.Struct({ person: Schema.String, fields: Schema.Array(Schema.String) }),
-  },
-  (input) =>
-    Effect.gen(function* confirming() {
-      const log = yield* Log
-      const p = yield* log.read((db) => readPerson(db, input.person))
-      if (p === null) {
-        return yield* Effect.fail(new Error(`No person ${input.person}`))
-      }
-      const ids = new Set(input.fields)
-      const chosen = p.fields.filter((f) => ids.has(f.id) && (!f.user || f.suggested === true))
-      if (chosen.length === 0) {
-        return yield* Effect.fail(new Error("Nothing to keep"))
-      }
-      const batch = batchId("confirm")
-      const kept = chosen.map((f) =>
-        make({ ...f, confidence: 1, suggested: false }, f.source, true),
-      )
-      yield* commit(
-        batch,
-        [PersonUpdated.make({ id: p.id, added: kept, removed: chosen, batch, reason: "kept" })],
-        true,
-      )
-      return { id: p.id, batch, kept: kept.length }
     }),
 )
 
@@ -713,15 +542,11 @@ export const contactsApp = defineApp<LogService | ModelsService>({
     normalizeTool,
     backupTool,
     pushTool,
-    enrichTool,
     undoTool,
     importTool,
-    identifyTool,
     logTool,
-    identified,
     peopleTool,
     history,
-    confirm,
   ],
   events: contactEvents,
   widgets: [
@@ -750,43 +575,6 @@ export const contactsApp = defineApp<LogService | ModelsService>({
                 label: { "@path": "label" },
                 value: { "@path": "value" },
               }),
-            ],
-          },
-        },
-      ],
-    },
-    {
-      name: "identified",
-      title: "Identified",
-      surfaces: ["space"],
-      resource: "ui://contacts/identified",
-      size: {
-        aspect: "auto",
-        min: { cols: 3, rows: 1 },
-        preferred: { cols: 4, rows: 3 },
-        grows: true,
-        empty: "hide",
-      },
-      tool: "identified",
-      refresh: [SenderIdentified.type],
-      a2ui: () => [
-        { version: "1.0", createSurface: { surfaceId: "identified", catalogId: SWITCH_CATALOG } },
-        {
-          version: "1.0",
-          updateComponents: {
-            surfaceId: "identified",
-            components: [
-              component("root", { component: "Stack", children: ["people", "empty"] }),
-              component("people", {
-                component: "Lines",
-                children: { componentId: "line", path: "/people" },
-              }),
-              component("line", {
-                component: "Field",
-                label: { "@path": "name" },
-                value: { "@path": "phone" },
-              }),
-              component("empty", { component: "Empty", label: { "@path": "/empty" } }),
             ],
           },
         },
