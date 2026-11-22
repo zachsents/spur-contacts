@@ -1,6 +1,6 @@
 // Contacts as an extension: its tools, its events, and a person card for chat.
 import type { Database } from "bun:sqlite"
-import { defineApp, Log, SWITCH_CATALOG, tool } from "switch-ext-kit"
+import { BASIC_CATALOG, defineApp, Log, SWITCH_CATALOG, tool } from "switch-ext-kit"
 import type { LogService, ModelsService } from "switch-ext-kit"
 import { Effect, Schema } from "effect"
 
@@ -564,10 +564,15 @@ export const contactsApp = defineApp<LogService | ModelsService>({
           updateComponents: {
             surfaceId: "person",
             components: [
-              component("root", { component: "Stack", children: ["name", "facts"] }),
+              component("root", {
+                component: "Column",
+                catalogId: BASIC_CATALOG,
+                children: ["name", "facts"],
+              }),
               component("name", { component: "Title", label: { "@path": "/name" } }),
               component("facts", {
-                component: "Lines",
+                component: "List",
+                catalogId: BASIC_CATALOG,
                 children: { componentId: "fact", path: "/facts" },
               }),
               component("fact", {
