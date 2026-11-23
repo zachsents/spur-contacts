@@ -1,10 +1,11 @@
 // The rest of Switch, reached the way an agent reaches it: the core's apps over MCP (`/apps`), and
-// its loopback routes. What Contacts asks of it: the user's connected Google account and a fresh
-// token for it, or an action item asking the user to connect one.
+// its loopback routes. What Contacts asks of it: events in the brain, the user's connected Google
+// account and a fresh token for it, or an action item asking the user to connect one.
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import { Effect } from "effect"
 
-import { isJson, parse, rec, str } from "./json.ts"
+import { isJson, parse, rec, recs, str } from "./json.ts"
+import type { Json } from "./json.ts"
 
 export const core = (): string => process.env.SWITCH_URL ?? "http://127.0.0.1:4871"
 
@@ -35,6 +36,65 @@ export const callCore = (name: string, args: Record<string, unknown>) =>
     } catch {
       connected = null
       return null
+    }
+  })
+
+/** One event in the brain's log; `payload` parsed. */
+export interface BrainEvent {
+  readonly seq: number
+  readonly id: string
+  readonly time: number
+  readonly type: string
+  readonly source: string
+  readonly payload: unknown
+}
+
+/** A condition of `brain_query`. */
+export interface Where {
+  readonly field: string
+  readonly op: string
+  readonly value?: unknown
+}
+
+const PAGE = 500
+
+const brainEvent = (r: Json): BrainEvent => ({
+  seq: Number(r.seq),
+  id: String(r.id),
+  time: Number(r.time),
+  type: String(r.type),
+  source: String(r.source),
+  payload: r.payload,
+})
+
+/**
+ * The log's events matching `where` after seq `after`, oldest first, a page at a time. `whole` is
+ * false when the core stopped answering partway: what's there is still every match up to its last.
+ */
+export const brainEvents = (where: readonly Where[], after: number) =>
+  Effect.gen(function* paging() {
+    const events: BrainEvent[] = []
+    let last = after
+    for (;;) {
+      const r = yield* callCore("brain_query", {
+        where: [...where, { field: "seq", op: ">", value: last }],
+        oldest: true,
+        limit: PAGE,
+      })
+      if (r === null || !Array.isArray(r.events)) {
+        return { events, whole: false }
+      }
+      const page = recs(r.events).map(brainEvent)
+      for (const e of page) {
+        if (Number.isNaN(e.seq) || e.seq <= last) {
+          return { events, whole: false }
+        }
+        events.push(e)
+        last = e.seq
+      }
+      if (r.events.length < PAGE) {
+        return { events, whole: true }
+      }
     }
   })
 

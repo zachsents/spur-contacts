@@ -2,12 +2,10 @@
 // `<extension>.contact` events in Switch's brain, and they come in here like an address book's
 // cards, each under its extension's name. An extension publishes a record again whenever it
 // changes.
-import { Database } from "bun:sqlite"
-import { existsSync } from "node:fs"
 import { Effect, Schema } from "effect"
 
+import { brainEvents } from "./core.ts"
 import type { SourceRecord } from "./merge.ts"
-import { BRAIN } from "./senders.ts"
 import type { Stated } from "./store.ts"
 
 const strings = Schema.optionalKey(Schema.Array(Schema.String))
@@ -32,7 +30,7 @@ export const Offered = Schema.Struct({
 })
 export type Offer = typeof Offered.Type
 
-const decode = Schema.decodeUnknownOption(Schema.fromJsonString(Offered))
+const decode = Schema.decodeUnknownOption(Offered)
 
 const PHONE_ONLY = /^[+\d\s().-]+$/u
 
@@ -69,33 +67,30 @@ export const toRecord = (source: string, o: Offer): SourceRecord => {
   return { source, ref: { service: source, value: o.ref }, fields, user: false, create: true }
 }
 
-/** Every source's records as last published, by source. */
-export const offered = Effect.sync(() => {
+/** Every source's records as last published, by source; fails when the core can't be reached. */
+export const offered = Effect.gen(function* reading() {
+  const { events, whole } = yield* brainEvents(
+    [{ field: "type", op: "contains", value: ".contact" }],
+    0,
+  )
+  if (!whole) {
+    return yield* Effect.fail(new Error("Can't reach the core"))
+  }
+  const latest = new Map<string, { source: string; o: Offer }>()
+  for (const e of events) {
+    if (!e.type.endsWith(".contact") || e.type.startsWith("contacts.")) {
+      continue
+    }
+    const o = decode(e.payload)
+    if (o._tag === "Some") {
+      latest.set(`${e.source}\n${o.value.ref}`, { source: e.source, o: o.value })
+    }
+  }
   const by = new Map<string, SourceRecord[]>()
-  if (!existsSync(BRAIN)) {
-    return by
+  for (const { source, o } of latest.values()) {
+    const list = by.get(source) ?? []
+    list.push(toRecord(source, o))
+    by.set(source, list)
   }
-  const db = new Database(BRAIN, { readwrite: true, create: false })
-  try {
-    const rows = db
-      .query<{ source: string; payload: string }, []>(
-        "SELECT source, payload FROM events WHERE type LIKE '%.contact' AND type NOT LIKE 'contacts.%' ORDER BY seq",
-      )
-      .all()
-    const latest = new Map<string, { source: string; o: Offer }>()
-    for (const r of rows) {
-      const o = decode(r.payload)
-      if (o._tag === "Some") {
-        latest.set(`${r.source}\n${o.value.ref}`, { source: r.source, o: o.value })
-      }
-    }
-    for (const { source, o } of latest.values()) {
-      const list = by.get(source) ?? []
-      list.push(toRecord(source, o))
-      by.set(source, list)
-    }
-    return by
-  } finally {
-    db.close()
-  }
+  return by
 })

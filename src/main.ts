@@ -9,7 +9,7 @@ import { Effect, Layer } from "effect"
 import { contactsApp } from "./app.ts"
 import { backup, push } from "./push.ts"
 import { background } from "./run.ts"
-import { batchId, logLayer } from "./store.ts"
+import { batchId, logLayer, moveLegacy } from "./store.ts"
 import { undo } from "./undo.ts"
 
 const services = Layer.mergeAll(logLayer(), Models.layer)
@@ -38,6 +38,7 @@ const cli = (word: string, args: readonly string[]) =>
     }
   })
 
+moveLegacy()
 const word = process.argv.at(2)
 if (word === undefined) {
   await serveStdio(contactsApp, Layer.provideMerge(background, services))

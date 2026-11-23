@@ -1,8 +1,9 @@
 // What the extension remembers between runs, beside its log: cursors into Switch's brain and
 // Switchboard, how far its log has gone out, and when each address book was first taken in
 // (nothing goes out to a book before that).
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import path from "node:path"
+import { writeFileAtomic } from "switch-ext-kit"
 
 import { parse, rec } from "./json.ts"
 import { DIR } from "./store.ts"
@@ -45,11 +46,11 @@ export const load = (): State => {
 /** Saves the state; when each book was imported only ever gains, whoever saved last. */
 export const save = (s: State) => {
   const disk = load().imported
-  writeFileSync(STATE, JSON.stringify({ ...s, imported: { ...disk, ...s.imported } }))
+  writeFileAtomic(STATE, JSON.stringify({ ...s, imported: { ...disk, ...s.imported } }))
 }
 
 /** Marks a book imported, keeping whatever else changed on disk meanwhile. */
 export const markImported = (book: "apple" | "google") => {
   const s = load()
-  writeFileSync(STATE, JSON.stringify({ ...s, imported: { ...s.imported, [book]: Date.now() } }))
+  writeFileAtomic(STATE, JSON.stringify({ ...s, imported: { ...s.imported, [book]: Date.now() } }))
 }

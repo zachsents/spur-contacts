@@ -1,15 +1,12 @@
 // Everyone who messages the user, from the brain: texts, iMessage, email, Instagram. Switch's brain
 // holds Switchboard's records as `app.observed` once migrated; until then (and while Switchboard
 // still senses) they're read from Switchboard's core with `sb`.
-import { Database } from "bun:sqlite"
-import { existsSync } from "node:fs"
-import path from "node:path"
 import { Effect } from "effect"
 
+import { brainEvents } from "./core.ts"
 import { parse, rec, recs, str, strings } from "./json.ts"
 import type { SourceRecord } from "./merge.ts"
 import { phoneKey } from "./text.ts"
-import { SWITCH } from "./store.ts"
 import type { Stated } from "./store.ts"
 
 /** One record as Switchboard wrote it. */
@@ -30,39 +27,41 @@ export const STREAMS = [
   "comms/instagram",
 ] as const
 
-export const BRAIN = process.env.SWITCH_BRAIN ?? path.join(SWITCH, "brain.db")
-
-/** Records in Switch's own brain after `after` (its seq). */
+/**
+ * Records in Switch's brain after `after` (its seq), through the core's `brain_query`, and the seq
+ * read through: the last one seen, else `after`. Nothing past what was read when the core stops
+ * answering.
+ */
 export const fromBrain = (after: number) =>
-  Effect.sync(() => {
-    const none: Seen[] = []
-    if (!existsSync(BRAIN)) {
-      return { seen: none, cursor: after }
-    }
-    const db = new Database(BRAIN, { readwrite: true, create: false })
-    try {
-      const rows = db
-        .query<{ seq: number; id: string; time: number; payload: string }, [number]>(
-          "SELECT seq, id, time, payload FROM events WHERE type = 'app.observed' AND seq > ? AND json_extract(payload, '$.stream') LIKE 'comms/%' ORDER BY seq",
-        )
-        .all(after)
-      const seen = rows.map((r): Seen => {
-        const p = rec(parse(r.payload))
-        return {
-          id: r.id,
-          at: r.time,
-          stream: String(p.stream),
-          kind: String(p.kind),
-          space: typeof p.space === "string" ? p.space : null,
-          body: rec(p.body),
+  brainEvents(
+    [
+      { field: "type", op: "==", value: "app.observed" },
+      { field: "payload.stream", op: "startsWith", value: "comms/" },
+    ],
+    after,
+  ).pipe(
+    Effect.map(({ events }) => {
+      const seen: Seen[] = []
+      for (const e of events) {
+        const p = rec(e.payload)
+        if (
+          e.type === "app.observed" &&
+          typeof p.stream === "string" &&
+          p.stream.startsWith("comms/")
+        ) {
+          seen.push({
+            id: e.id,
+            at: e.time,
+            stream: p.stream,
+            kind: String(p.kind),
+            space: typeof p.space === "string" ? p.space : null,
+            body: rec(p.body),
+          })
         }
-      })
-      const head = db.query<{ seq: number | null }, []>("SELECT max(seq) AS seq FROM events").get()
-      return { seen, cursor: head?.seq ?? after }
-    } finally {
-      db.close()
-    }
-  })
+      }
+      return { seen, cursor: events.at(-1)?.seq ?? after }
+    }),
+  )
 
 const QUERIES: Readonly<Record<string, string>> = {
   "comms/gmail": 'stream("comms/gmail") | where body.entity startswith "gmail-message"',

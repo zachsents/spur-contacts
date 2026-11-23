@@ -50,8 +50,9 @@ Extensions view (⌘K, Extensions). It runs on a Mac (it reads Contacts through 
 - Allow the host to control Contacts the first time it reads them.
 - Apple is imported as soon as Contacts answers, Google as soon as it's connected (or run the
   `import` tool). Its loops keep senders and other sources coming in and push changes out every two
-  minutes (`CONTACTS_LOOPS=0` turns them off). Its log and state live in `$SWITCH_CONTACTS_DIR`, else `$SWITCH_DIR`, else
-  `~/.switch`.
+  minutes (`CONTACTS_LOOPS=0` turns them off). Its log, state and backups live in
+  `$SWITCH_CONTACTS_DIR`, else the folder it runs in (its own, under the host); what an older
+  version kept in `$SWITCH_DIR` (else `~/.switch`) moves there on the first start.
 
 Another extension adds people by emitting `<extension>.contact` events with `{ ref, name?, aliases?,
 emails?, phones?, handles?, company?, role?, note?, spaces? }`.

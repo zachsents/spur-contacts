@@ -52,7 +52,9 @@ export const importBooks = (again: boolean, ask: boolean) =>
 export const importAll = (again: boolean) =>
   Effect.gen(function* importing() {
     const { apple, google } = yield* importBooks(again, true)
-    const others = yield* importOffered()
+    const others = yield* importOffered().pipe(
+      Effect.catch((error) => Effect.succeed(failed(error))),
+    )
     const state = load()
     const senders = yield* importSenders({ brain: state.brain, since: state.since })
     state.brain = senders.cursor.brain
@@ -69,7 +71,7 @@ const forward = Effect.gen(function* forwarding() {
     Stream.runForEach((e) =>
       Effect.gen(function* sending() {
         if (e.type.startsWith("contacts.")) {
-          yield* Effect.ignore(events.emit({ type: e.type, payload: e.payload }))
+          yield* Effect.ignore(events.emit({ id: e.id, type: e.type, payload: e.payload }))
         }
         const s = load()
         s.forwarded = e.seq
