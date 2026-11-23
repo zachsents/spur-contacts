@@ -5,6 +5,7 @@ import type { LogService, ModelsService } from "switch-ext-kit"
 import { Effect, Schema } from "effect"
 
 import { SCOPE } from "./google.ts"
+import { Heartbeat } from "./heartbeat.ts"
 
 import { linkCard, normalizeAll, setFields } from "./edit.ts"
 import { mergeByHand } from "./merge.ts"
@@ -548,7 +549,7 @@ export const contactsApp = defineApp<LogService | ModelsService>({
     peopleTool,
     history,
   ],
-  events: contactEvents,
+  events: [...contactEvents, Heartbeat],
   widgets: [
     {
       name: "person",

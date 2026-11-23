@@ -34,6 +34,7 @@ import {
   googleUpdate,
 } from "./google.ts"
 import type { GooglePerson } from "./google.ts"
+import { why } from "./heartbeat.ts"
 import { parse, rec, recs, text } from "./json.ts"
 import type { Json } from "./json.ts"
 import {
@@ -759,7 +760,14 @@ const writeApple = (writing: readonly Plan[], batch: string) =>
     const errors: string[] = []
     for (let i = 0; i < writing.length; i += 25) {
       const chunk = writing.slice(i, i + 25)
-      const results = yield* appleEdit(chunk.map((pl) => appleEditOf(pl)))
+      // A chunk that fails is its cards' error, and the next chunk goes on.
+      const exit = yield* Effect.exit(appleEdit(chunk.map((pl) => appleEditOf(pl))))
+      if (exit._tag === "Failure") {
+        const error = why(exit.cause)
+        errors.push(...chunk.map((pl) => `${nameOrId(pl)}: ${error}`))
+        continue
+      }
+      const results = exit.value
       const events: Draft[] = []
       for (const [j, r] of results.entries()) {
         const pl = chunk[j]

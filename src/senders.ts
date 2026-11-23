@@ -40,7 +40,7 @@ export const fromBrain = (after: number) =>
     ],
     after,
   ).pipe(
-    Effect.map(({ events }) => {
+    Effect.map(({ events, whole }) => {
       const seen: Seen[] = []
       for (const e of events) {
         const p = rec(e.payload)
@@ -59,7 +59,7 @@ export const fromBrain = (after: number) =>
           })
         }
       }
-      return { seen, cursor: events.at(-1)?.seq ?? after }
+      return { seen, cursor: events.at(-1)?.seq ?? after, whole }
     }),
   )
 

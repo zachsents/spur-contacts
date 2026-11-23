@@ -19,6 +19,8 @@ import {
 } from "./model.ts"
 import { phoneKey } from "./text.ts"
 import { offered } from "./offered.ts"
+import { attempt, why } from "./heartbeat.ts"
+import { keepRecord, tookRecord } from "./kept.ts"
 import { batchId, commit, make } from "./store.ts"
 import { fromBrain, fromSwitchboard, gather, toRecord as senderRecord } from "./senders.ts"
 import type { Sender } from "./senders.ts"
@@ -47,8 +49,15 @@ export const takeAll = (
     let matched = 0
     let asked = 0
     let cost = 0
+    // Each record on its own: one that won't take is kept, with why, and the rest go on.
     for (const r of records) {
-      const o = yield* take(r, batch, `import ${source}`, matching)
+      const exit = yield* Effect.exit(take(r, batch, `import ${source}`, matching))
+      if (exit._tag === "Failure") {
+        keepRecord(source, matching, r, why(exit.cause))
+        continue
+      }
+      tookRecord(source, r)
+      const o = exit.value
       created += o.created ? 1 : 0
       merged += o.merged
       matched += o.matched ? 1 : 0
@@ -150,61 +159,68 @@ export const importSenders = (cursor: { readonly brain: number; readonly since: 
     const batch = batchId("unknown")
     const unknown: { id: string; sender: Sender }[] = []
     for (const s of senders.filter(unknownSender)) {
-      // Whoever already holds the number is who it is; a new person only for a number no one has.
-      const holder = yield* log.read(
-        (db) =>
-          db
-            .query<{ person: string }, [string]>(
-              "SELECT f.person FROM fields f JOIN people p ON p.id = f.person WHERE f.kind = 'phone' AND f.norm = ? AND p.merged_into IS NULL AND p.retired = 0 ORDER BY p.created LIMIT 1",
+      const error = yield* attempt(
+        Effect.gen(function* unknownOne() {
+          // Whoever already holds the number is who it is; a new person only for a number no one has.
+          const holder = yield* log.read(
+            (db) =>
+              db
+                .query<{ person: string }, [string]>(
+                  "SELECT f.person FROM fields f JOIN people p ON p.id = f.person WHERE f.kind = 'phone' AND f.norm = ? AND p.merged_into IS NULL AND p.retired = 0 ORDER BY p.created LIMIT 1",
+                )
+                .get(phoneKey(s.handle))?.person ?? null,
+          )
+          const o =
+            holder === null
+              ? yield* take({ ...senderRecord(s), create: true }, batch, "senders", "keys")
+              : { person: holder }
+          if (o.person === null) {
+            return
+          }
+          const id = o.person
+          const named = yield* log.read((db) => {
+            const p = readPerson(db, id)
+            const fromBook = p?.fields.some(
+              (f) =>
+                f.kind === "name" &&
+                f.suggested !== true &&
+                (f.user || ["apple", "google", "imessage", "fastpeoplesearch"].includes(f.source)),
             )
-            .get(phoneKey(s.handle))?.person ?? null,
+            const flagged =
+              db
+                .query<{ n: number }, [string]>(
+                  "SELECT count(*) AS n FROM events WHERE type = 'contacts.sender_unknown' AND json_extract(payload, '$.id') = ?",
+                )
+                .get(id)?.n ?? 0
+            return {
+              fromBook: fromBook === true,
+              flagged: flagged > 0,
+              name: p ? best(p, "name") : undefined,
+            }
+          })
+          if (!named.fromBook) {
+            unknown.push({ id, sender: s })
+            if (!named.flagged) {
+              yield* commit(batch, [
+                SenderUnknown.make({
+                  id,
+                  handle: s.handle,
+                  channel: s.channel,
+                  batch,
+                  reason: "unknown sender",
+                }),
+              ])
+            }
+          }
+        }),
       )
-      const o =
-        holder === null
-          ? yield* take({ ...senderRecord(s), create: true }, batch, "senders", "keys")
-          : { person: holder }
-      if (o.person === null) {
-        continue
-      }
-      const id = o.person
-      const named = yield* log.read((db) => {
-        const p = readPerson(db, id)
-        const fromBook = p?.fields.some(
-          (f) =>
-            f.kind === "name" &&
-            f.suggested !== true &&
-            (f.user || ["apple", "google", "imessage", "fastpeoplesearch"].includes(f.source)),
-        )
-        const flagged =
-          db
-            .query<{ n: number }, [string]>(
-              "SELECT count(*) AS n FROM events WHERE type = 'contacts.sender_unknown' AND json_extract(payload, '$.id') = ?",
-            )
-            .get(id)?.n ?? 0
-        return {
-          fromBook: fromBook === true,
-          flagged: flagged > 0,
-          name: p ? best(p, "name") : undefined,
-        }
-      })
-      if (!named.fromBook) {
-        unknown.push({ id, sender: s })
-        if (!named.flagged) {
-          yield* commit(batch, [
-            SenderUnknown.make({
-              id,
-              handle: s.handle,
-              channel: s.channel,
-              batch,
-              reason: "unknown sender",
-            }),
-          ])
-        }
+      if (error !== null) {
+        keepRecord("senders", "keys", { ...senderRecord(s), create: true }, error)
       }
     }
     let last = cursor.since
     for (const r of seen) {
       last = Math.max(last, r.at)
     }
-    return { tally, unknown, cursor: { brain: own.cursor, since: last } }
+    return { tally, unknown, cursor: { brain: own.cursor, since: last }, whole: own.whole }
   })
