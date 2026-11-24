@@ -1,3 +1,5 @@
+**Moved to [zachsents/switch](https://github.com/zachsents/switch/tree/main/extensions/contacts).** This repo is archived.
+
 # switch-ext-contacts
 
 People and companies in one set: the Apple and Google address books, other extensions' contacts and
