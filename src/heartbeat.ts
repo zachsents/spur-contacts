@@ -82,5 +82,9 @@ export const beat = <E, R>(round: boolean, facts: Effect.Effect<Facts, E, R>) =>
       Heartbeat.make({ entity: "sense:contacts", summary, facts: { failing: f, ...known } }),
     )
     told = f
-    at = now
+    // Only the senders loop's own beats set when the next is due, so one on a change never
+    // pushes it back.
+    if (round) {
+      at = now
+    }
   }).pipe(Effect.ignore({ log: "Warn" }))

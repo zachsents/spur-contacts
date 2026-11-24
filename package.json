@@ -57,6 +57,7 @@
   "extension": {
     "name": "contacts",
     "main": "src/main.ts",
+    "heartbeat": 420000,
     "needs": [
       "macos"
     ],

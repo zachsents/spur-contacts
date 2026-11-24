@@ -67,6 +67,9 @@ const QUERIES: Readonly<Record<string, string>> = {
   "comms/gmail": 'stream("comms/gmail") | where body.entity startswith "gmail-message"',
 }
 
+/** `sb` keeps retrying while Switchboard's core is down; past this it's no answer, and the round goes on. */
+const SB_WAIT_MS = 30_000
+
 /** Records from Switchboard's core since `since` (ms). */
 export const fromSwitchboard = (since: number) =>
   Effect.forEach(
@@ -76,7 +79,11 @@ export const fromSwitchboard = (since: number) =>
         try: async () => {
           const base = QUERIES[stream] ?? `stream("${stream}")`
           const q = `${base} | where at > ${since} | project id, at, kind, about, body`
-          const proc = Bun.spawn(["sb", "query", q], { stdout: "pipe", stderr: "pipe" })
+          const proc = Bun.spawn(["sb", "query", q], {
+            stdout: "pipe",
+            stderr: "pipe",
+            timeout: SB_WAIT_MS,
+          })
           const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
           if (code !== 0) {
             throw new Error(`sb query ${stream} exited ${code}`)
