@@ -1,5 +1,6 @@
 // Whether the sense works: `contacts.heartbeat`, beaten by the senders loop itself, so it stops
-// when that loop does. Every five minutes, and at once when what's failing changes.
+// when that loop does. Every five minutes, and at once when what's failing changes or it falls
+// behind the brain's messages or catches up.
 import { AppEvents, defineEvent } from "switch-ext-kit"
 import { Cause, Effect, Schema } from "effect"
 
@@ -20,6 +21,8 @@ export const Heartbeat = defineEvent(
       people: Schema.Finite,
       /** Records and events not taken in or sent on, each tried again the next round. */
       skipped: Schema.Finite,
+      /** 0 when its last look found every message read, else how long since one did. */
+      behind_ms: Schema.Finite,
     }),
   }),
 )
@@ -52,6 +55,7 @@ export const several = (errors: readonly string[]) => {
 
 const parts = new Map<string, string>()
 let told: string | null | undefined
+let toldBehind = false
 let at = 0
 
 const failing = () =>
@@ -71,17 +75,19 @@ export const beat = <E, R>(round: boolean, facts: Effect.Effect<Facts, E, R>) =>
   Effect.gen(function* beating() {
     const now = Date.now()
     const f = failing()
-    if (f === told && !(round && now - at >= EVERY - SLACK)) {
+    const known = yield* facts
+    const late = known.behind_ms > 0
+    if (f === told && late === toldBehind && !(round && now - at >= EVERY - SLACK)) {
       return
     }
     const events = yield* AppEvents
-    const known = yield* facts
     const summary =
       parts.size === 0 ? `${known.people} people` : `failing: ${[...parts.keys()].join(", ")}`
     yield* events.emit(
       Heartbeat.make({ entity: "sense:contacts", summary, facts: { failing: f, ...known } }),
     )
     told = f
+    toldBehind = late
     // Only the senders loop's own beats set when the next is due, so one on a change never
     // pushes it back.
     if (round) {

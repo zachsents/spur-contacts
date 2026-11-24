@@ -1,15 +1,23 @@
-// Everyone who messages the user, from the brain: texts, iMessage, email, Instagram. Switch's brain
-// holds Switchboard's records as `app.observed` once migrated; until then (and while Switchboard
-// still senses) they're read from Switchboard's core with `sb`.
-import { Effect } from "effect"
+// Everyone who messages the user, from the brain: texts and iMessage, Gmail, Instagram, and a
+// business's text and email conversations. Each message is a brain event the extension follows,
+// its record in `payload.data` (`stream`, `data.facts`).
+import type { Followed } from "switch-ext-kit"
 
-import { brainEvents } from "./core.ts"
-import { parse, rec, recs, str, strings } from "./json.ts"
+import { rec, recs, str } from "./json.ts"
 import type { SourceRecord } from "./merge.ts"
 import { phoneKey } from "./text.ts"
 import type { Stated } from "./store.ts"
 
-/** One record as Switchboard wrote it. */
+/** The brain's event types that carry someone's messages. */
+export const FOLLOWS = [
+  "texts.message",
+  "google.gmail.message",
+  "instagram-dms.thread",
+  "kerf.comms.text",
+  "kerf.comms.email",
+] as const
+
+/** One message's record. */
 export interface Seen {
   readonly id: string
   readonly at: number
@@ -19,93 +27,18 @@ export interface Seen {
   readonly body: Record<string, unknown>
 }
 
-export const STREAMS = [
-  "comms/imessage",
-  "comms/texts",
-  "comms/email",
-  "comms/gmail",
-  "comms/instagram",
-] as const
-
-/**
- * Records in Switch's brain after `after` (its seq), through the core's `brain_query`, and the seq
- * read through: the last one seen, else `after`. Nothing past what was read when the core stops
- * answering.
- */
-export const fromBrain = (after: number) =>
-  brainEvents(
-    [
-      { field: "type", op: "==", value: "app.observed" },
-      { field: "payload.stream", op: "startsWith", value: "comms/" },
-    ],
-    after,
-  ).pipe(
-    Effect.map(({ events, whole }) => {
-      const seen: Seen[] = []
-      for (const e of events) {
-        const p = rec(e.payload)
-        if (
-          e.type === "app.observed" &&
-          typeof p.stream === "string" &&
-          p.stream.startsWith("comms/")
-        ) {
-          seen.push({
-            id: e.id,
-            at: e.time,
-            stream: p.stream,
-            kind: String(p.kind),
-            space: typeof p.space === "string" ? p.space : null,
-            body: rec(p.body),
-          })
-        }
-      }
-      return { seen, cursor: events.at(-1)?.seq ?? after, whole }
-    }),
-  )
-
-const QUERIES: Readonly<Record<string, string>> = {
-  "comms/gmail": 'stream("comms/gmail") | where body.entity startswith "gmail-message"',
+/** A followed event's record. */
+export const seenOf = (e: Followed): Seen => {
+  const p = rec(e.payload)
+  return {
+    id: e.id,
+    at: e.time,
+    stream: str(p.stream),
+    kind: str(p.kind),
+    space: typeof p.space === "string" ? p.space : null,
+    body: rec(p.data),
+  }
 }
-
-/** `sb` keeps retrying while Switchboard's core is down; past this it's no answer, and the round goes on. */
-const SB_WAIT_MS = 30_000
-
-/** Records from Switchboard's core since `since` (ms). */
-export const fromSwitchboard = (since: number) =>
-  Effect.forEach(
-    STREAMS,
-    (stream) =>
-      Effect.tryPromise({
-        try: async () => {
-          const base = QUERIES[stream] ?? `stream("${stream}")`
-          const q = `${base} | where at > ${since} | project id, at, kind, about, body`
-          const proc = Bun.spawn(["sb", "query", q], {
-            stdout: "pipe",
-            stderr: "pipe",
-            timeout: SB_WAIT_MS,
-          })
-          const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
-          if (code !== 0) {
-            throw new Error(`sb query ${stream} exited ${code}`)
-          }
-          const rows = recs(rec(parse(out)).rows)
-          return rows.map((r): Seen => {
-            const about = strings(r.about)
-            const ws = about.find((a) => a !== null && a.startsWith("ws:")) ?? undefined
-            return {
-              id: String(r.id),
-              at: Number(r.at),
-              stream,
-              kind: String(r.kind),
-              space: ws === undefined ? null : ws.slice(3),
-              body: rec(r.body),
-            }
-          })
-        },
-        catch: (e) => (e instanceof Error ? e : new Error(String(e))),
-      }),
-    { concurrency: 3 },
-  ).pipe(Effect.map((all) => all.flat()))
 
 const MARKETING =
   /reply stop|text stop|txt stop|stop to (?:end|opt|cancel|unsubscribe)|opt[- ]?out|unsubscribe|verification code|your code is/iu
@@ -130,31 +63,30 @@ const isPhoneName = (v: string) => /^[+\d\s().-]+$/u.test(v)
 
 type Get = (channel: string, kind: Sender["kind"], handle: string) => Sender
 
+/** The other side of a one to one chat ("any;-;+15551234567"); "" for a group. */
+const ONE = /;-;(?<handle>[^;]+)$/u
+
 const fromIMessage = (r: Seen, get: Get) => {
-  const b = r.body
-  const handle = str(b.handle)
+  const f = rec(r.body.facts)
   // One to one only: group chats say nothing about who a handle is.
-  if (handle === "" || str(b.chat) !== handle) {
-    return
-  }
+  const handle = ONE.exec(str(f.chat))?.groups?.handle ?? ""
   const isPhone = handle.startsWith("+") && phoneKey(handle) !== ""
   if (!isPhone && !handle.includes("@")) {
     return
   }
   const s = get("imessage", isPhone ? "phone" : "email", handle)
   s.last = Math.max(s.last, r.at)
-  if (b.from_me === true) {
+  if (f.from_me === true) {
     s.fromUser += 1
     s.create = true
   } else {
     s.fromThem += 1
-    const said = str(b.text)
-    if (MARKETING.test(said)) {
+    if (MARKETING.test(str(f.text))) {
       s.marketing += 1
     }
-    const from = str(b.from)
-    if (from !== "" && from !== handle && !isPhoneName(from)) {
-      s.names.add(from)
+    const name = str(f.name)
+    if (name !== "" && name !== handle && !isPhoneName(name)) {
+      s.names.add(name)
     }
   }
   if (s.fromThem > 0 && s.marketing < s.fromThem) {
@@ -257,7 +189,7 @@ export const gather = (seen: readonly Seen[]) => {
   }
   for (const r of seen) {
     const f = rec(r.body.facts)
-    if (r.stream === "comms/imessage" && r.kind === "message") {
+    if (r.stream === "comms/imessage") {
       fromIMessage(r, get)
     } else if (r.stream === "comms/texts" && str(f.phone) !== "") {
       fromConversation(r, get, "texts")

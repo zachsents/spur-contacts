@@ -8,22 +8,14 @@ import type { Related } from "./apple.ts"
 import { googleBook } from "./google.ts"
 import { take } from "./merge.ts"
 import type { Matching, SourceRecord } from "./merge.ts"
-import {
-  best,
-  Imported,
-  normOf,
-  PersonUpdated,
-  readPerson,
-  resolve,
-  SenderUnknown,
-} from "./model.ts"
+import { Imported, normOf, PersonUpdated, readPerson, resolve, SenderUnknown } from "./model.ts"
 import { phoneKey } from "./text.ts"
 import { offered } from "./offered.ts"
 import { attempt, why } from "./heartbeat.ts"
 import { keepRecord, tookRecord } from "./kept.ts"
 import { batchId, commit, make } from "./store.ts"
-import { fromBrain, fromSwitchboard, gather, toRecord as senderRecord } from "./senders.ts"
-import type { Sender } from "./senders.ts"
+import { gather, toRecord as senderRecord } from "./senders.ts"
+import type { Seen, Sender } from "./senders.ts"
 
 export interface Tally {
   readonly source: string
@@ -145,20 +137,25 @@ export const unknownSender = (s: Sender) =>
   s.kind === "phone" && s.fromThem > 0 && s.marketing < s.fromThem
 
 /**
- * Senders since the cursors: folded in, and each phone no address book names recorded as an
- * unknown sender, once. Returns the unknown ones.
+ * The senders of one message (`id`, the brain event's), folded in, and each phone no address book
+ * names recorded as an unknown sender, once. Every change is named after `id` and the sender, so the
+ * same message taken in again changes nothing. A record that won't take is kept, with why.
  */
-export const importSenders = (cursor: { readonly brain: number; readonly since: number }) =>
+export const takeSenders = (seen: Seen, id: string) =>
   Effect.gen(function* sensing() {
     const log = yield* Log
-    const own = yield* fromBrain(cursor.brain)
-    const sb = yield* fromSwitchboard(cursor.since).pipe(Effect.orElseSucceed(() => []))
-    const seen = [...own.seen, ...sb]
-    const senders = gather(seen)
-    const tally = yield* takeAll("senders", senders.map(senderRecord))
+    const senders = gather([seen])
+    const taking = batchId("import-senders")
+    for (const [i, r] of senders.map(senderRecord).entries()) {
+      const exit = yield* Effect.exit(take(r, taking, "import senders", "model", `${id}:${i}`))
+      if (exit._tag === "Failure") {
+        keepRecord("senders", "model", r, why(exit.cause))
+      } else {
+        tookRecord("senders", r)
+      }
+    }
     const batch = batchId("unknown")
-    const unknown: { id: string; sender: Sender }[] = []
-    for (const s of senders.filter(unknownSender)) {
+    for (const [i, s] of senders.filter(unknownSender).entries()) {
       const error = yield* attempt(
         Effect.gen(function* unknownOne() {
           // Whoever already holds the number is who it is; a new person only for a number no one has.
@@ -172,14 +169,20 @@ export const importSenders = (cursor: { readonly brain: number; readonly since: 
           )
           const o =
             holder === null
-              ? yield* take({ ...senderRecord(s), create: true }, batch, "senders", "keys")
+              ? yield* take(
+                  { ...senderRecord(s), create: true },
+                  batch,
+                  "senders",
+                  "keys",
+                  `${id}:unknown:${i}`,
+                )
               : { person: holder }
           if (o.person === null) {
             return
           }
-          const id = o.person
+          const { person } = o
           const named = yield* log.read((db) => {
-            const p = readPerson(db, id)
+            const p = readPerson(db, person)
             const fromBook = p?.fields.some(
               (f) =>
                 f.kind === "name" &&
@@ -191,26 +194,24 @@ export const importSenders = (cursor: { readonly brain: number; readonly since: 
                 .query<{ n: number }, [string]>(
                   "SELECT count(*) AS n FROM events WHERE type = 'contacts.sender_unknown' AND json_extract(payload, '$.id') = ?",
                 )
-                .get(id)?.n ?? 0
-            return {
-              fromBook: fromBook === true,
-              flagged: flagged > 0,
-              name: p ? best(p, "name") : undefined,
-            }
+                .get(person)?.n ?? 0
+            return { fromBook: fromBook === true, flagged: flagged > 0 }
           })
-          if (!named.fromBook) {
-            unknown.push({ id, sender: s })
-            if (!named.flagged) {
-              yield* commit(batch, [
+          if (!named.fromBook && !named.flagged) {
+            yield* commit(
+              batch,
+              [
                 SenderUnknown.make({
-                  id,
+                  id: person,
                   handle: s.handle,
                   channel: s.channel,
                   batch,
                   reason: "unknown sender",
                 }),
-              ])
-            }
+              ],
+              false,
+              `${id}:flag:${i}`,
+            )
           }
         }),
       )
@@ -218,9 +219,4 @@ export const importSenders = (cursor: { readonly brain: number; readonly since: 
         keepRecord("senders", "keys", { ...senderRecord(s), create: true }, error)
       }
     }
-    let last = cursor.since
-    for (const r of seen) {
-      last = Math.max(last, r.at)
-    }
-    return { tally, unknown, cursor: { brain: own.cursor, since: last }, whole: own.whole }
   })

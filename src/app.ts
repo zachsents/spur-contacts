@@ -30,6 +30,7 @@ import type { Field, Person } from "./model.ts"
 import { batchId, commit, makeAll, missing } from "./store.ts"
 import { backup, linksOf, push } from "./push.ts"
 import { importAll } from "./run.ts"
+import { FOLLOWS } from "./senders.ts"
 import { labelOf, pretty, score } from "./text.ts"
 import { undo } from "./undo.ts"
 
@@ -279,7 +280,7 @@ const importTool = tool(
   "import",
   {
     description:
-      "Take every source in: Apple and Google the first time (`again`: once more, for cards made there since), merged only into someone who surely is the same (a shared phone, email or handle and the same name); other extensions' contacts; and everyone who messages the user. Returns counts per source.",
+      "Take every source in: Apple and Google the first time (`again`: once more, for cards made there since), merged only into someone who surely is the same (a shared phone, email or handle and the same name); and other extensions' contacts. Returns counts per source.",
     input: Schema.Struct({ again: Schema.optionalKey(Schema.Boolean) }),
   },
   (input) => importAll(input.again === true),
@@ -531,6 +532,7 @@ export const contactsApp = defineApp<LogService | ModelsService>({
   name: "contacts",
   version: "1",
   connections: [{ provider: "google", scopes: [SCOPE], multiple: false }],
+  reaches: { follows: [...FOLLOWS] },
   instructions:
     "The user's people and companies, merged from Apple, Google, other sources and everyone who messages them; Switch is the source of truth and pushes changes out to Apple and Google every two minutes. Every field keeps its source and confidence; every change is a batch `undo` reverts, including what it sent. `set` edits single fields and labels; `update` adds or removes list fields (phones, emails, handles, links); `merge` folds duplicates; `link` ties a person to a card.",
   tools: [

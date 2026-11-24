@@ -294,8 +294,17 @@ const contacted = (
   ]
 }
 
-/** Takes one record in. Sequential: each sees what the last wrote. */
-export const take = (record: SourceRecord, batch: string, reason: string, matching: Matching) =>
+/**
+ * Takes one record in. Sequential: each sees what the last wrote. `change` names its change, so taking
+ * the same record again under it is a no-op.
+ */
+export const take = (
+  record: SourceRecord,
+  batch: string,
+  reason: string,
+  matching: Matching,
+  change?: string,
+) =>
   Effect.gen(function* taking() {
     const log = yield* Log
     const now = Date.now()
@@ -333,7 +342,7 @@ export const take = (record: SourceRecord, batch: string, reason: string, matchi
     if (person !== null) {
       events.push(...contacted(person, record, batch, reason, now))
     }
-    yield* commit(batch, events)
+    yield* commit(batch, events, false, change)
     return {
       person: person?.id ?? null,
       created,

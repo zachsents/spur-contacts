@@ -1,10 +1,15 @@
 // What runs beyond single tool calls: the whole import, and the loops that keep senders and other
 // sources coming in and changes going out.
-import { AppEvents, Log } from "switch-ext-kit"
+import { readFileSync } from "node:fs"
+import { AppEvents, Host, Log } from "switch-ext-kit"
+import type { Followed } from "switch-ext-kit"
 import { Effect, Layer, Schedule, Stream } from "effect"
 
-import { importApple, importGoogle, importOffered, importSenders } from "./ingest.ts"
-import { askForGoogle } from "./core.ts"
+import { importApple, importGoogle, importOffered, takeSenders } from "./ingest.ts"
+import { askForGoogle, brainEvents } from "./core.ts"
+import type { Where } from "./core.ts"
+import { parse, rec } from "./json.ts"
+import { FOLLOWS, seenOf } from "./senders.ts"
 import { googleConnected } from "./google.ts"
 import { attempt, beat, setFailing, several, why } from "./heartbeat.ts"
 import { keepEvent, kept, keptLine, tried } from "./kept.ts"
@@ -71,19 +76,14 @@ export const importBooks = (again: boolean, ask: boolean) =>
     return { apple, google: connected ? google : { error: "Google isn't connected" } }
   })
 
-/** The books (each once), other sources and senders, with counts. */
+/** The books (each once) and other sources, with counts. */
 export const importAll = (again: boolean) =>
   Effect.gen(function* importing() {
     const { apple, google } = yield* importBooks(again, true)
     const others = yield* importOffered().pipe(
       Effect.catch((error) => Effect.succeed(failed(error))),
     )
-    const state = load()
-    const senders = yield* importSenders({ brain: state.brain, since: state.since })
-    state.brain = senders.cursor.brain
-    state.since = senders.cursor.since
-    save(state)
-    return { apple, google, others, senders: senders.tally, unknown: senders.unknown.length }
+    return { apple, google, others }
   })
 
 const published = new Set<string>(contactEvents.map((e) => e.type))
@@ -140,16 +140,83 @@ const retry = Effect.gen(function* retrying() {
   }
 })
 
-const sense = Effect.gen(function* sensing() {
-  yield* retry
-  const state = load()
-  const senders = yield* importSenders({ brain: state.brain, since: state.since })
-  state.brain = senders.cursor.brain
-  state.since = senders.cursor.since
-  save(state)
-  if (!senders.whole) {
+/** The last message handled: the kit's follow.json (its folder's) until one is handled here. */
+let handled = (() => {
+  try {
+    const { after } = rec(parse(readFileSync("follow.json", "utf-8")))
+    return typeof after === "number" ? after : 0
+  } catch {
+    return 0
+  }
+})()
+
+/** How long since a look last found every message read; 0 when the last one did. */
+let behind = 0
+const started = Date.now()
+
+/** One message's senders taken in; what goes wrong is the trouble of following. */
+const heard = (e: Followed) =>
+  takeSenders(seenOf(e), e.id).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        handled = e.seq
+        setFailing("following", null)
+      }),
+    ),
+    Effect.catchCause((cause) =>
+      Effect.sync(() => {
+        setFailing("following", why(cause))
+      }),
+    ),
+  )
+
+/**
+ * The messages followed from the brain, each once in order, resuming after the last handled. Asked
+ * before the host is there, or refused, the kit asks again when the host next connects.
+ */
+const following = Effect.gen(function* follow() {
+  const host = yield* Host
+  const context = yield* Effect.context<Effect.Services<ReturnType<typeof heard>>>()
+  const handle = (e: Followed) => Effect.provideContext(heard(e), context)
+  setFailing("following", yield* attempt(host.follow(FOLLOWS, handle)))
+})
+
+/** Every message in the brain: a record on a `comms/` stream with a sender, whatever its type. */
+const MESSAGES: readonly Where[] = [
+  { field: "payload.stream", op: "startsWith", value: "comms/" },
+  { field: "payload.sender", op: "exists", value: true },
+]
+
+/**
+ * How far behind the brain's messages it is: each one since the last look is read when it's of a
+ * type followed and handled. One that isn't (a type no longer followed, a follow stalled) holds the
+ * cursor, and `behind` grows from when a look last found them all read.
+ */
+const look = Effect.gen(function* looking() {
+  const s = load()
+  const { events, whole } = yield* brainEvents(MESSAGES, s.brain)
+  let all = whole
+  for (const e of events) {
+    if (!(FOLLOWS as readonly string[]).includes(e.type) || e.seq > handled) {
+      all = false
+      break
+    }
+    s.brain = e.seq
+  }
+  const now = Date.now()
+  if (all) {
+    s.caughtUp = now
+  }
+  behind = all ? 0 : now - (s.caughtUp === 0 ? started : s.caughtUp)
+  save(s)
+  if (!whole) {
     yield* Effect.fail(new Error("Can't reach the core"))
   }
+})
+
+const sense = Effect.gen(function* sensing() {
+  yield* retry
+  yield* look
 })
 
 /** When a book whose push had errors is pushed again, though nothing changed. */
@@ -194,7 +261,7 @@ const facts = Effect.gen(function* counting() {
         )
         .get()?.n ?? 0,
   )
-  return { people, skipped: kept().length }
+  return { people, skipped: kept().length, behind_ms: behind }
 })
 
 /**
@@ -219,9 +286,9 @@ const every = <E, R>(
   )
 
 /**
- * The log forwarded, and, unless CONTACTS_LOOPS=0: senders and what was skipped every 5 minutes,
- * with the heartbeat; other sources every hour; a book not yet imported every 10 minutes (Google
- * once it's connected); changes out every 2.
+ * The log forwarded, and, unless CONTACTS_LOOPS=0: senders as their messages come; what was skipped
+ * and how far behind the messages it is every 5 minutes, with the heartbeat; other sources every
+ * hour; a book not yet imported every 10 minutes (Google once it's connected); changes out every 2.
  */
 export const background = Layer.effectDiscard(
   Effect.gen(function* starting() {
@@ -229,6 +296,7 @@ export const background = Layer.effectDiscard(
     if (process.env.CONTACTS_LOOPS === "0") {
       return
     }
+    yield* Effect.forkScoped(following)
     yield* every("senders", sense, Schedule.spaced("5 minutes"), true)
     yield* every("other sources", importOffered("keys"), Schedule.spaced("1 hour"))
     yield* every("books", importBooks(false, false), Schedule.spaced("10 minutes"))

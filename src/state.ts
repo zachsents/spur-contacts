@@ -1,6 +1,6 @@
-// What the extension remembers between runs, beside its log: cursors into Switch's brain and
-// Switchboard, how far its log has gone out, and when each address book was first taken in
-// (nothing goes out to a book before that).
+// What the extension remembers between runs, beside its log: how far the brain's messages are all
+// read and when they last were, how far its log has gone out, and when each address book was first
+// taken in (nothing goes out to a book before that).
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import { writeFileAtomic } from "switch-ext-kit"
@@ -11,8 +11,10 @@ import { DIR } from "./store.ts"
 const STATE = path.join(DIR, "contacts-state.json")
 
 export interface State {
+  /** The brain's seq through which every message has been read. */
   brain: number
-  since: number
+  /** When a look last found every message read, as epoch ms; 0 before the first. */
+  caughtUp: number
   forwarded: number
   pushedThrough: number
   /** When each book was imported, as epoch ms. */
@@ -34,13 +36,13 @@ export const load = (): State => {
     const s = rec(parse(readFileSync(STATE, "utf-8")))
     return {
       brain: num(s.brain),
-      since: num(s.since),
+      caughtUp: num(s.caughtUp),
       forwarded: num(s.forwarded),
       pushedThrough: num(s.pushedThrough),
       imported: importedOf(s.imported),
     }
   } catch {
-    return { brain: 0, since: 0, forwarded: 0, pushedThrough: 0, imported: {} }
+    return { brain: 0, caughtUp: 0, forwarded: 0, pushedThrough: 0, imported: {} }
   }
 }
 /** Saves the state; when each book was imported only ever gains, whoever saved last. */

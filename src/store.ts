@@ -124,8 +124,11 @@ const derived = (batch: string, events: readonly Draft[]) =>
     })
   })
 
-/** Writes one change: its events made normal, name parts kept up, checked, in one transaction. */
-export const commit = (batch: string, given: readonly Draft[], byUser = false) =>
+/**
+ * Writes one change: its events made normal, name parts kept up, checked, in one transaction. `change`
+ * names it: written again with the same one, it's a no-op.
+ */
+export const commit = (batch: string, given: readonly Draft[], byUser = false, change?: string) =>
   Effect.gen(function* committing() {
     if (given.length === 0) {
       return 0
@@ -136,7 +139,7 @@ export const commit = (batch: string, given: readonly Draft[], byUser = false) =
     )
     const events = [...normal, ...(yield* derived(batch, normal))]
     const receipt = yield* log.dispatch({
-      id: crypto.randomUUID(),
+      id: change ?? crypto.randomUUID(),
       type: Change.type,
       source: byUser ? "user" : "contacts",
       payload: { batch, byUser, events },
